@@ -1,6 +1,16 @@
 (() => {
 const get = id => document.getElementById(id);
 const board = get('board');
+const friendshipMeter=document.createElement('div');
+const friendshipFill=document.createElement('span');
+friendshipMeter.hidden=true;
+friendshipMeter.setAttribute('role','progressbar');
+friendshipMeter.setAttribute('aria-label','우정 게이지');
+friendshipMeter.setAttribute('aria-valuenow','0');
+Object.assign(friendshipMeter.style,{height:'8px',background:'#38294f',borderRadius:'4px',overflow:'hidden',margin:'0 8px 4px'});
+Object.assign(friendshipFill.style,{display:'block',height:'100%',background:'#ffaddb',width:'0%'});
+friendshipMeter.append(friendshipFill);
+get('bossHud').before(friendshipMeter);
 const ctx = board.getContext('2d');
 const W = 360, H = 710, startY = 648, minY = 385, maxY = 679;
 const boardCorners = [[6,6],[W-10,6],[6,H-10],[W-10,H-10]];
@@ -72,6 +82,18 @@ const companions=[
   {name:'루나',color:'#ffd3a6',length:32,width:5,lanes:[[-9,20],[9,-20]],cadence:.52}
 ];
 const maxPower=weapons.length-1;
+const friendshipGoal=28, friendshipRadius=43;
+const specialNames=['부채꼴 폭죽','관통 광선','별빛 방어막','두 배 연사','X자 교차 탄막'];
+const specialDurations=[.4,1.2,3,4,2];
+const specialSounds=[
+  [[550,1320,.18,.15],[1000,470,.19,.10,'square',.18]],
+  [[290,810,.7,.16,'sawtooth'],[580,1020,.43,.1,'sine',.12]],
+  [[440,660,.34,.14,'sine'],[660,880,.42,.11,'sine',.12]],
+  [[440,620,.09,.11],[620,830,.09,.11,'triangle',.09],[830,1240,.15,.12,'triangle',.18]],
+  [[1047,392,.42,.13],[330,988,.42,.13]]
+];
+const fanStyle={...companions[0],lanes:Array.from({length:15},(_,i)=>[0,(i-7)*48])};
+const crossStyle={...companions[4],lanes:[[-22,175],[22,-175]]};
 function companionIndex(area){return area-1;}
 function companion(){return companions[companionIndex(run.area)];}
 function launch(style,x,y,options={}){
@@ -150,6 +172,12 @@ function ship(g,x,y,power){
   drawSprite(g,playerArt[stage],x,y-3,shipWidths[stage],47);
 }
 function hud(){
+  friendshipMeter.hidden=!run.escorts.length;
+  const charge=Math.floor(run.friendship*100/friendshipGoal)+'%';
+  if(friendshipFill.style.width!==charge){
+    friendshipFill.style.width=charge;
+    friendshipMeter.setAttribute('aria-valuenow',charge.slice(0,-1));
+  }
   get('score').textContent='점수 '+String(run.score).padStart(4,'0');
   get('level').textContent=run.area+'구역';
   const boss=run.boss;
@@ -175,7 +203,7 @@ function hud(){
       : '방패 편대 · '+(run.extra.broken?'방패 해제!':(run.extra.side<0?'왼쪽':'오른쪽')+' 빈틈 / 빛나는 지휘 별'))
     :run.escort
     ? companion().name+' 구출 · '+(run.escort.result||
-      (run.escort.flight?'탈출 엄호 '+Math.max(0,Math.ceil(9.8-run.clock))+'초 · 조준 중인 적 격추':(run.escort.deadline?Math.max(0,Math.ceil(run.escort.deadline-run.clock))+'초 · ':'')+rescueInstructions[run.area-1]))
+      (run.escort.flight?'탈출 엄호 '+Math.max(0,Math.ceil(run.escort.duration-run.clock))+'초 · 조준 중인 적 격추':(run.escort.deadline?Math.max(0,Math.ceil(run.escort.deadline-run.clock))+'초 · ':'')+rescueInstructions[run.area-1]))
     : run.boss
       ? (run.area===5?'최종 보스':'중간보스 달그림자')+' · '+(run.boss.open?'핵이 열렸어요!':wingNames||'공격을 피하세요')
       : run.breakthrough
@@ -395,6 +423,8 @@ function combatSound(kind,preview=false){
 }
 function home(){
   audioAttempt++;audioRetry=false;
+  if(run)resetItemCompanions();
+  friendshipMeter.hidden=true;
   state='home';release();musicSilenceUntil=0;syncSound();battleMusic.currentTime=0;
   get('home').hidden=false;get('game').hidden=true;
   get('record').textContent='최고점 '+best;
@@ -610,6 +640,7 @@ function wave(){
   musicSilenceUntil=0;
   run.clock=0;run.enemyTimer=.85;run.diveTimer=1.5;run.waveWait=.85;
   run.enemies=[];run.bullets=[];run.shots=[];run.hitGhosts=[];run.defeated=0;run.volleyCount=0;
+  run.entryEnd=0;run.entryBonus=0;run.quickClear=false;
   run.escort=null;run.boss=null;run.breakthrough=null;run.satellite=null;run.extra=null;run.bossBanner=0;syncBattleTone();
   if(run.stage===0){
     // Each transfer has one two-row crossing wave, before the destination's normal waves.
@@ -619,11 +650,13 @@ function wave(){
     extraFormation();return;
   }
   if(run.stage===3){
+    if(run.escapeCheckpoint){startEscape();return;}
     if(!run.lunaEscort)run.rescueScore=run.score;
     run.drops=[];
+    run.rescueCompanions=snapshotItemCompanions();
     run.escort={x:W/2,y:221,result:'',end:0,launched:0,
       deadline:run.area===2?23:run.area===4?17.55:0,
-      flight:run.area===5&&Boolean(run.lunaEscort),
+      flight:run.area===5&&Boolean(run.lunaEscort),duration:9.8,
       hearts:run.area===3||run.area===5?3:0,nextThreat:run.area===3&&run.mode===1?5:4.2,threatCount:0};
     const target=(x,kind,hp)=>({x,y:164,baseX:x,phase:'escort',kind,
       fires:x<W/2?2.45:3.6,hp,hitUntil:0});
@@ -650,18 +683,26 @@ function wave(){
     setWings(run.wings);makeBoss();return;
   }
   const rows=run.area>=4?3:2;
+  const route=((run.area-1)*2+run.stage-1)%4;
+  run.entryBonus=rows*5*100*.20;
   const mix=run.area>=3?run.layouts[run.area]:null;
   for(let row=0;row<rows;row++){
     for(let column=0;column<5;column++){
       const x=82+column*49+(mix?mix.side*(row%2?14:-10):0);
       const y=89+row*48+(mix&&mix.variant?(column%2?9:-5):0);
-      const arrival=mix&&run.stage===2?(row%2?1.15:.15)+column*.13:0;
-      run.enemies.push({baseX:x,baseY:y,x,y:arrival?-35:y,row,phase:'formation',time:0,arrival});
+      const delay=column*.09+row*.17,duration=1.55;
+      const side=route===0?-1:route===1?1:row%2?1:-1;
+      const fromX=route===2?W/2:side<0?-24:W+24;
+      const fromY=route===2?-24:y+(route===3?18:-42);
+      const entry={route,side,fromX,fromY,delay,duration};
+      run.entryEnd=Math.max(run.entryEnd,delay+duration);
+      run.enemies.push({baseX:x,baseY:y,x:fromX,y:fromY,row,phase:'formation',time:0,entry});
     }
   }
 }
 function start(){
   run={x:W/2,y:startY,flash:0,muzzle:0,area:1,stage:1,mode,extraCleared:new Set(),rescueMistakes:new Set(),layouts:Object.fromEntries([2,3,4,5].map(area=>[area,{side:Math.random()<.5?-1:1,variant:Math.floor(Math.random()*2)}])),rescued:false,team:[],wings:[],wingShots:[],selected:0,support:0,pickup:null,preview:0,level:1,score:0,hp:3,power:0,shield:false,bolt:0,comet:0,cometShot:0,shots:[],drops:[],sparks:[],fireTimer:0,invincible:0};
+  resetItemCompanions();
   release();wave();hud();
   state='playing';get('overlay').hidden=true;focusBoard();activateSound();syncSound();
 }
@@ -790,17 +831,25 @@ function moveGuards(){
 function cageThreats(){
   const r=run,e=r.escort;
   if(!e?.hearts||e.result)return;
-  if(r.clock>=e.nextThreat){
-    const side=(e.threatCount++%2?1:-1)*r.layouts[r.area].side;
+  if(r.clock>=e.nextThreat&&(!e.shortFlight||e.threatCount<3)){
+    const side=(e.threatCount++%2?1:-1)*(r.layouts[r.area]?.side??1);
     r.enemies.push({x:180+side*107,y:166,kind:'cageThreat',phase:'escort',
       hp:3+r.mode,hitUntil:0,fires:r.clock+(e.flight?2.25:2.55)});
-    e.nextThreat=r.clock+(e.flight?2.35:r.area===3?5:3.7);
+    e.nextThreat=r.clock+(e.shortFlight?1.4:e.flight?2.35:r.area===3?5:3.7);
   }
   for(const enemy of r.enemies){
     if(enemy.kind!=='cageThreat'||enemy.dead||r.clock<enemy.fires)continue;
     enemy.dead=true;e.hearts--;r.rescueMistakes.add(r.area);e.lastHit={x:enemy.x,y:enemy.y,time:r.clock};
     burst(e.x,e.y,1,0,'#ffa58f');
   }
+}
+function startEscape(){
+  const r=run;
+  r.clock=0;r.boss=null;r.satellite=null;r.bossBanner=0;
+  r.enemies=[];r.bullets=[];r.shots=[];r.hitGhosts=[];
+  r.escort={x:W/2,y:221,result:'',flight:true,shortFlight:true,duration:6,
+    hearts:3,nextThreat:.55,threatCount:0};
+  syncBattleTone();
 }
 function escortStep(){
   const r=run,e=r.escort;
@@ -812,37 +861,169 @@ function escortStep(){
     return;
   }
   if(e.flight){
-    const progress=clamp(r.clock/9.8,0,1);
+    const progress=clamp(r.clock/e.duration,0,1);
     e.x=180+Math.sin(progress*Math.PI*2)*67;
     e.y=221+progress*149;
   }
   const live=kind=>r.enemies.some(unit=>unit.kind===kind&&!unit.dead);
-  const pending=r.area===2?live('lock'):r.area===4?live('runner'):
-    e.flight?r.clock<9.8:r.enemies.some(unit=>unit.kind!=='cageThreat'&&!unit.dead)||r.boss?.hp>0;
+  const pending=e.flight?r.clock<e.duration:r.area===2?live('lock'):r.area===4?live('runner'):
+    r.enemies.some(unit=>unit.kind!=='cageThreat'&&!unit.dead)||r.boss?.hp>0;
   if(r.area===5&&!e.flight&&!pending&&e.hearts>0){
     r.lunaEscort=true;r.escortHearts=Math.max(1,e.hearts);r.rescueScore=r.score;wave();return;
   }
-  const lost=(r.area===3||r.area===5)&&e.hearts<=0;
-  if(pending||lost){
-    const timeout=e.deadline&&r.clock>=e.deadline;
+  const lost=(e.flight||r.area===3||r.area===5)&&e.hearts<=0;
+  const timeout=e.deadline&&r.clock>=e.deadline;
+  if(pending||lost||timeout){
     if(timeout||lost){
       r.rescueMistakes.add(r.area);
-      if(e.flight)r.escortHearts=3;
+      if(e.flight&&!e.shortFlight)r.escortHearts=3;
       release();state='rescueRetry';
+      if(e.shortFlight){
+        show('탈출 엄호 실패','점선으로 '+companion().name+'를 겨누는 적부터 격추하세요.','탈출 엄호 다시 도전');
+        return;
+      }
       show(lost?(e.flight?'루나의 기체가 피격됐어요':'감옥이 공격받았어요'):r.area===4?'열쇠가 달아났어요':'구출 시간 종료',
         lost?(e.flight?'점선으로 루나를 겨누는 적부터 격추하세요.':'감옥을 겨누는 적을 먼저 막아보세요.'):'열린 잠금이나 열쇠를 먼저 노려보세요.','구출 다시 도전');
     }
     return;
   }
+  if(r.area<5&&!e.flight){
+    r.escapeCheckpoint={score:r.score,companions:snapshotItemCompanions(),
+      special:snapshotSpecial(r.special),specialNotice:r.specialNotice};
+    startEscape();return;
+  }
+  r.escapeCheckpoint=null;
   recruit();
   r.enemies=[];r.bullets=[];r.shots=[];
   const id=companionIndex(r.area);
-  e.result=e.flight?'루나 구출 성공!':companions[id].name+' 합류 · '+supportNames[id];e.launched=r.clock;e.end=r.clock+1.7;
+  e.result=r.area===5?'루나 구출 성공!':companions[id].name+' 합류 · '+supportNames[id];e.launched=r.clock;e.end=r.clock+1.7;
   burst(e.x,e.y,2,300);
 }
 function wingX(i=0){
-  const offset=run.wings.length===2?(i===0?-36:36):(run.x>W*.7?-36:36);
-  return clamp(run.x+offset,13,W-13);
+  const side=run.wings.length===2?(i===0?-1:1):(run.x>W*.7?-1:1);
+  return clamp(run.x+side*36,13,W-13);
+}
+function itemCompanionX(i){
+  return clamp(run.x+(i===0?-36:36),13,W-13);
+}
+function resetItemCompanions(){
+  Object.assign(run,{escorts:[],escortShots:[],friendship:0,lastSpecial:-1,special:null,specialNotice:0});
+  run.drops=run.drops.filter(d=>d.type!=='companion');
+}
+function snapshotItemCompanions(source=run){
+  const {escorts,escortShots,friendship,lastSpecial}=source;
+  return {escorts:[...escorts],escortShots:[...escortShots],friendship,lastSpecial};
+}
+function snapshotSpecial(special){
+  return special&&{...special,bossDamage:new Map(special.bossDamage)};
+}
+function dropCompanion(target){
+  const r=run;
+  if(!r.team.length||r.drops.some(d=>d.type==='companion')||Math.random()>=.045)return;
+  const available=r.team.filter(id=>!r.escorts.includes(id));
+  const pool=available.length?available:r.team;
+  r.drops.push({x:target.x,y:target.y,type:'companion',id:pool[Math.floor(Math.random()*pool.length)]});
+}
+function collectCompanion(id){
+  const r=run,friend=companions[id];
+  combatSound('pickup');
+  if(r.escorts.length===2||r.escorts.includes(id)){
+    r.friendship=Math.min(friendshipGoal,r.friendship+friendshipGoal*.4);
+    addScore(300);
+    r.pickup={text:'우정 보너스!',color:friend.color,time:1.2};
+  }else{
+    r.escortShots.push(r.escorts.length*.24);
+    r.escorts.push(id);
+    r.pickup={text:friend.name+' 동행!',color:friend.color,time:1.2};
+  }
+  burst(r.x,r.y,1,0,friend.color);
+}
+function hitItemCompanions(){
+  const r=run,y=r.y+3;
+  for(let i=r.escorts.length-1;i>=0;i--){
+    const x=itemCompanionX(i);
+    const touches=unit=>(unit.x-x)**2+(unit.y-y)**2<=9**2;
+    const bullet=r.bullets.find(b=>!b.dead&&touches(b));
+    if(!bullet&&!r.enemies.some(touches)&&!(r.boss?.hp>0&&touches(r.boss))&&
+      !(r.satellite?.hp>0&&touches(r.satellite)))continue;
+    if(bullet)bullet.dead=true;
+    const [id]=r.escorts.splice(i,1);
+    r.escortShots.splice(i,1);
+    const friend=companions[id];
+    burst(x,y,0,0,friend.color);
+    soundLayers([[480,250,.2,.12,'sine']]);
+    r.pickup={text:friend.name+' 귀환…',color:friend.color,time:1.2};
+  }
+}
+function wingCadence(friend,count){
+  return (friend.cadence||.48)+(count===2?.12:0);
+}
+function wingSupport(dt){
+  const r=run;
+  const active=r.boss?r.boss.open&&r.boss.hp>0:!r.escort&&r.enemies.length>0;
+  const boosted=active&&r.support>0;
+  if(boosted){
+    r.support=Math.max(0,r.support-dt);
+    for(const [i,id] of r.wings.entries()){
+      r.wingShots[i]-=dt;
+      if(r.wingShots[i]>0)continue;
+      const friend=companions[id];
+      r.wingShots[i]=wingCadence(friend,r.wings.length);
+      launch(friend,wingX(i),r.y-10);
+    }
+  }
+  if((boosted&&r.wings.length)||r.escort?.result)return;
+  for(const [i,id] of r.escorts.entries()){
+    r.escortShots[i]-=dt;
+    if(r.escortShots[i]>0)continue;
+    const friend=companions[id];
+    r.escortShots[i]=wingCadence(friend,r.escorts.length);
+    launch(friend,itemCompanionX(i),r.y-10);
+  }
+}
+function chargeFriendship(){
+  const r=run;
+  if(r.escorts.length)r.friendship=Math.min(friendshipGoal,r.friendship+1);
+}
+function updateFriendship(dt){
+  const r=run;
+  if(r.specialNotice>0)r.specialNotice=Math.max(0,r.specialNotice-dt);
+  if(r.special){
+    r.special.time-=dt;
+    if(r.special.time<=0)r.special=null;
+  }
+  if(!r.special&&r.escorts.length&&r.friendship===friendshipGoal&&!r.escort?.result){
+    const i=(r.escorts.indexOf(r.lastSpecial)+1)%r.escorts.length;
+    const id=r.escorts[i];
+    r.friendship=0;r.lastSpecial=id;r.specialNotice=1;
+    r.special={id,time:specialDurations[id],next:0,volleys:0,bossDamage:new Map()};
+    soundLayers(specialSounds[id]);
+  }
+  const special=r.special;
+  if(!special)return;
+  special.next-=dt;
+  if(special.next>0)return;
+  const {id}=special;
+  if(id===0&&special.volleys<2){
+    if(r.shots.length+15>maxShots)r.shots.splice(0,r.shots.length+15-maxShots);
+    special.next=.24;special.volleys++;
+    launch(fanStyle,r.x,r.y-22,{special});
+  }else if(id===1&&r.shots.length<maxShots){
+    special.next=.15;
+    r.shots.push({x:r.x,y:r.y-22,style:companions[1],ray:true,special,damage:2});
+  }else if(id===4){
+    special.next=.14;
+    launch(crossStyle,r.x,r.y-20,{special});
+  }
+}
+function bossShotDamage(shot,boss){
+  const damage=shot.damage||1;
+  if(!shot.special)return damage;
+  const totals=shot.special.bossDamage;
+  const used=totals.get(boss)||0;
+  const allowed=Math.min(damage,boss.hp,Math.max(0,boss.maxHp*.08-used));
+  totals.set(boss,used+allowed);
+  return allowed;
 }
 function beginEnding(){
   release();state='ending';run.ending=0;
@@ -871,6 +1052,69 @@ function impact(hold,strength,flash=0){
   }
   if(flash)run.bossFlash=flash;
 }
+function hitEnemy(r,s,target){
+  if(target.dead)return;
+  s.dead=true;
+  if(target.phase==='escort'){
+    if(!activeTarget(target)){
+      if(!target.blockUntil||r.clock>=target.blockUntil){
+        target.blockUntil=r.clock+.17;
+        combatSound('block');burst(target.x,target.y,0,0,'#a5bdf9');
+      }
+      return;
+    }
+    target.hp-=s.damage||1;target.hitUntil=r.clock+.13;
+    if(target.hp>0){target.whiteFrames=2;combatSound('hit');burst(target.x,target.y,1,0,s.style?.color);return;}
+  }
+  if(target.phase==='extra'){
+    const blocked=target.kind==='plate'&&!r.extra.broken||
+      (target.kind==='leader'||target.kind==='rear')&&!target.open;
+    if(blocked){
+      if(!target.hitUntil||target.hitUntil<r.clock){
+        target.hitUntil=r.clock+.15;combatSound('block');burst(target.x,target.y,0,0,'#bdc8ff');
+      }
+      return;
+    }
+    target.hp-=s.damage||1;target.hitUntil=r.clock+.13;
+    if(target.hp>0){target.whiteFrames=2;combatSound('hit');burst(target.x,target.y,1,0,s.style?.color);return;}
+    const lastRear=target.kind==='rear'&&!r.enemies.some(e=>e!==target&&!e.dead&&e.kind==='rear');
+    if((target.kind==='leader'||lastRear)&&!r.extra.broken){
+      r.extra.broken=true;
+      for(const plate of r.enemies.filter(e=>e.kind==='plate')){
+        plate.dead=true;burst(plate.x,plate.y,1,0,'#9aaeea');
+      }
+      r.pickup={text:'방패 편대 해제!',color:'#ffe9a6',time:1.1};
+    }
+  }
+  if(target.phase==='breakthrough'){
+    target.hp-=s.damage||1;target.hitUntil=r.clock+.12;
+    if(target.hp>0){target.whiteFrames=2;combatSound('hit');burst(target.x,target.y,1,0,s.style?.color);return;}
+  }
+  if(target.phase==='formation'||target.phase==='warning'||target.phase==='dive'||target.phase==='return'){
+    target.hp=(target.hp??1)-(s.damage||1);
+    if(target.hp>0){target.whiteFrames=2;combatSound('hit');return;}
+  }
+  target.dead=true;combatSound('kill');
+  chargeFriendship();
+  if(target.kind==='leader')impact(.05,8);
+  else if(target.kind!=='lock'&&target.kind!=='reactor'&&target.kind!=='cageThreat'){
+    target.whiteFrames=1;
+    r.hitGhosts.push(target);
+  }
+  if(target.squad&&--target.squad.remaining===0)r.squadNotice=1.1;
+  const diving=target.phase==='dive';
+  const points=diving?180:100;
+  addScore(points);
+  r.flash=.13;
+  burst(target.x,target.y,target.phase==='breakthrough'?2:1,points,s.style?.color);
+  r.defeated++;
+  if(!r.escort)dropCompanion(target);
+  if(!r.escort&&!r.breakthrough&&!r.extra&&dropMilestones.includes(r.defeated)){
+    const type=r.defeated!==8?'star':r.stage===1
+      ? (r.area%2===1?'preview':'bolt') : 'comet';
+    r.drops.push({x:target.x,y:target.y,type});
+  }
+}
 function update(dt){
   const r=run;
   if(r.boss?.victoryTime!==undefined){updateVictory(dt);return;}
@@ -879,7 +1123,11 @@ function update(dt){
     r.y=dragTarget.y;
     dragTarget=null;
   }
-  r.clock+=dt;r.invincible=Math.max(0,r.invincible-dt);
+  r.clock+=dt;
+  if(r.escort?.deadline&&!r.escort.result&&r.clock>=r.escort.deadline){
+    escortStep();hud();return;
+  }
+  r.invincible=Math.max(0,r.invincible-dt);
   r.flash=Math.max(0,r.flash-dt);
   r.muzzle=Math.max(0,r.muzzle-dt);
   const held = new Set([...keys].map(key=>moveKeys.get(key)));
@@ -890,6 +1138,7 @@ function update(dt){
   r.y=clamp(r.y+dy*step,minY,maxY);
   r.bolt=Math.max(0,r.bolt-dt);r.comet=Math.max(0,r.comet-dt);
   r.preview=Math.max(0,r.preview-dt);
+  updateFriendship(dt);
   if(r.pickup)r.pickup.time-=dt;
   r.cometShot-=dt;
   if(r.comet>0&&r.cometShot<=0&&!(r.escort&&((!r.escort.flight&&r.clock<1.55)||r.escort.result))){
@@ -900,10 +1149,13 @@ function update(dt){
   if(r.fireTimer<=0&&!(r.escort&&((!r.escort.flight&&r.clock<1.55)||r.escort.result))){
     const power=r.preview>0?maxPower:r.power;
     const weapon=weapons[power];
-    r.fireTimer=r.bolt>0?.095:weapon.lanes.length===1?.24:.21;
+    const mint=r.special?.id===3?r.special:null;
+    const interval=r.bolt>0?.095:weapon.lanes.length===1?.24:.21;
+    r.fireTimer=mint?interval/2+Math.max(-dt,r.fireTimer):interval;
     r.muzzle=.085;
     const damage=doubleDamagePowers.includes(power)?2:1;
-    launch(weapon,r.x,r.y-20,{damage:damage*(1+r.mode*.20)});
+    const extraShot=mint&&++mint.volleys%2===0;
+    launch(weapon,r.x,r.y-20,{damage:damage*(1+r.mode*.20),special:extraShot?mint:null});
     shotSound(power,r.bolt>0);
   }
   const speed=1+Math.min(8,Math.max(0,r.area-2))*.075+pressure[r.mode].speed;
@@ -912,13 +1164,20 @@ function update(dt){
     if(e.phase==='breakthrough'){moveBreakthrough(e);continue;}
     if(e.phase==='extra'){moveExtra(e);continue;}
     e.time+=dt;
-    if(e.arrival&&e.time<e.arrival+.55){
-      const ratio=clamp((e.time-e.arrival)/.55,0,1);
-      e.x=e.baseX;e.y=-35+(e.baseY+35)*ratio;
-      continue;
-    }
     const fx=e.baseX+Math.sin(r.clock*1.7*speed)*40;
     const fy=e.baseY+Math.sin(r.clock*2+e.row)*6;
+    if(e.entry){
+      const {route,fromX,fromY,delay,duration}=e.entry;
+      const t=clamp((e.time-delay)/duration,0,1);
+      if(t<1){
+        e.x=fromX+(fx-fromX)*t;
+        e.y=fromY+(fy-fromY)*t;
+        if(route<2)e.y+=Math.sin(t*Math.PI*2)*43;
+        if(route===2)e.x=fromX+(fx-fromX)*t*t;
+        continue;
+      }
+      e.entry=null;
+    }
     if(e.phase==='formation'||e.phase==='warning'){
       e.x=fx;e.y=fy;
       if(e.phase==='warning'&&e.time>=.58){
@@ -941,18 +1200,8 @@ function update(dt){
   breakthroughAttack(speed);
   extraAttack(speed);
   moveGuards();
-  const supportActive=r.boss?r.boss.open&&r.boss.hp>0:!r.escort&&r.enemies.length>0;
-  if(supportActive&&r.support>0){
-    r.support=Math.max(0,r.support-dt);
-    for(const [i,id] of r.wings.entries()){
-      r.wingShots[i]-=dt;
-      if(r.wingShots[i]>0)continue;
-      const friend=companions[id];
-      r.wingShots[i]=(friend.cadence||.48)+(r.wings.length===2?.12:0);
-      launch(friend,wingX(i),r.y-10);
-    }
-  }
-  const formation=r.enemies.filter(e=>e.phase==='formation'&&e.y>0&&(!e.arrival||e.time>=e.arrival+.55));
+  wingSupport(dt);
+  const formation=r.enemies.filter(e=>e.phase==='formation'&&e.y>0&&!e.entry);
   if(r.enemyTimer<=0&&formation.length){
     r.enemyTimer=Math.max(r.mode===2?.65:.51,1.13-Math.max(0,r.area-2)*.055-pressure[r.mode].interval);
     const e=formation[Math.floor(Math.random()*formation.length)];
@@ -973,21 +1222,25 @@ function update(dt){
       if(target)s.vx=clamp((target.x-s.x)*4,-200,200);
     }
     s.prevX=s.x;s.prevY=s.y;
-    s.age+=dt;s.x+=s.vx*dt;s.y-=(s.homing?380:565)*dt;
+    if(s.ray){s.y=-30;s.dead=true;}
+    else{s.age+=dt;s.x+=s.vx*dt;s.y-=(s.homing?380:565)*dt;}
     const boss=r.boss, side=r.satellite;
-    if(side?.hp>0&&boss.hp>0&&Math.abs(s.x-side.x)<18&&Math.abs(s.y-side.y)<17){
+    if(side?.hp>0&&boss.hp>0&&Math.abs(s.x-side.x)<18&&
+      (s.ray?side.y<s.prevY:Math.abs(s.y-side.y)<17)){
       side.hp=Math.max(0,side.hp-(s.damage||1));s.dead=true;
       if(!side.hp){
-        addScore(450);combatSound('kill');burst(side.x,side.y,2,450);impact(.045,8);
+        addScore(450);chargeFriendship();combatSound('kill');burst(side.x,side.y,2,450);impact(.045,8);
         r.bullets=r.bullets.filter(b=>!b.side);
         r.pickup={text:'위성 격파 · 핵 개방 연장',color:'#ffe49a',time:1.25};
       }else{side.whiteFrames=2;combatSound('hit');burst(side.x,side.y,1,0,s.style?.color);}
-      continue;
+      if(!s.ray)continue;
     }
-    if(boss?.hp>0&&Math.abs(s.x-boss.x)<30&&Math.abs(s.y-boss.y)<22){
+    if(boss?.hp>0&&Math.abs(s.x-boss.x)<30&&
+      (s.ray?boss.y<s.prevY:Math.abs(s.y-boss.y)<22)){
       s.dead=true;
-      if(boss.open){
-        boss.hp=Math.max(0,boss.hp-(s.damage||1));
+      const damage=boss.open?bossShotDamage(s,boss):0;
+      if(damage>0){
+        boss.hp=Math.max(0,boss.hp-damage);
         if(r.area===5&&boss.phase2At===undefined&&boss.hp<=boss.maxHp/2){
           boss.hp=boss.maxHp/2;boss.open=false;boss.phase2At=r.clock;
           musicSilenceUntil=performance.now()+100;syncBattleTone();
@@ -998,7 +1251,7 @@ function update(dt){
             cleared=true;
             try{localStorage.setItem(clearKey,'1');}catch{}
           }
-          addScore(750);combatSound('boss');
+          addScore(750);chargeFriendship();combatSound('boss');
           musicSilenceUntil=0;syncBattleTone();impact(.055,11,.22);
           burst(boss.x,boss.y,2,750);r.flash=.13;
           r.bullets=[];r.waveWait=.7;
@@ -1009,80 +1262,38 @@ function update(dt){
             return;
           }
         }else{boss.whiteFrames=2;combatSound('hit');burst(boss.x,boss.y,1,0,s.style?.color);}
-      }else combatSound('block');
-      continue;
+      }else if(!boss.open)combatSound('block');
+      if(!s.ray)continue;
     }
-    let target=null;
-    for(const enemy of r.enemies){
-      if((!target||enemy.y>target.y)&&shotTouchesEnemy(s,enemy))target=enemy;
-    }
-    if(!target)continue;
-    s.dead=true;
-    if(target.phase==='escort'){
-      if(!activeTarget(target)){
-        if(!target.blockUntil||r.clock>=target.blockUntil){
-          target.blockUntil=r.clock+.17;
-          combatSound('block');burst(target.x,target.y,0,0,'#a5bdf9');
-        }
-        continue;
+    if(s.ray){
+      for(const target of r.enemies){
+        if(shotTouchesEnemy(s,target))hitEnemy(r,s,target);
       }
-      target.hp-=s.damage||1;target.hitUntil=r.clock+.13;
-      if(target.hp>0){target.whiteFrames=2;combatSound('hit');burst(target.x,target.y,1,0,s.style?.color);continue;}
-    }
-    if(target.phase==='extra'){
-      const blocked=target.kind==='plate'&&!r.extra.broken||
-        (target.kind==='leader'||target.kind==='rear')&&!target.open;
-      if(blocked){
-        if(!target.hitUntil||target.hitUntil<r.clock){
-          target.hitUntil=r.clock+.15;combatSound('block');burst(target.x,target.y,0,0,'#bdc8ff');
-        }
-        continue;
+    }else{
+      let target=null;
+      for(const enemy of r.enemies){
+        if((!target||enemy.y>target.y)&&shotTouchesEnemy(s,enemy))target=enemy;
       }
-      target.hp-=s.damage||1;target.hitUntil=r.clock+.13;
-      if(target.hp>0){target.whiteFrames=2;combatSound('hit');burst(target.x,target.y,1,0,s.style?.color);continue;}
-      const lastRear=target.kind==='rear'&&!r.enemies.some(e=>e!==target&&!e.dead&&e.kind==='rear');
-      if((target.kind==='leader'||lastRear)&&!r.extra.broken){
-        r.extra.broken=true;
-        for(const plate of r.enemies.filter(e=>e.kind==='plate')){
-          plate.dead=true;burst(plate.x,plate.y,1,0,'#9aaeea');
-        }
-        r.pickup={text:'방패 편대 해제!',color:'#ffe9a6',time:1.1};
-      }
-    }
-    if(target.phase==='breakthrough'){
-      target.hp-=s.damage||1;target.hitUntil=r.clock+.12;
-      if(target.hp>0){target.whiteFrames=2;combatSound('hit');burst(target.x,target.y,1,0,s.style?.color);continue;}
-    }
-    target.dead=true;combatSound('kill');
-    if(target.kind==='leader')impact(.05,8);
-    else if(target.kind!=='lock'&&target.kind!=='reactor'&&target.kind!=='cageThreat'){
-      target.whiteFrames=1;
-      r.hitGhosts.push(target);
-    }
-    if(target.squad&&--target.squad.remaining===0)r.squadNotice=1.1;
-    const diving=target.phase==='dive';
-    const points=diving?180:100;
-    addScore(points);
-    r.flash=.13;
-    burst(target.x,target.y,target.phase==='breakthrough'?2:1,points,s.style?.color);
-    r.defeated++;
-    if(!r.escort&&!r.breakthrough&&!r.extra&&dropMilestones.includes(r.defeated)){
-      const type=r.defeated!==8?'star':r.stage===1
-        ? (r.area%2===1?'preview':'bolt') : 'comet';
-      r.drops.push({x:target.x,y:target.y,type});
+      if(target)hitEnemy(r,s,target);
     }
   }
   r.shots=r.shots.filter(s=>!s.dead&&s.y>-20&&s.x>-20&&s.x<W+20);
   const hadEnemies=r.enemies.length>0;
   r.enemies=r.enemies.filter(e=>!e.dead);
-  if(hadEnemies&&!r.enemies.length&&!r.escort&&!r.breakthrough&&!r.boss)r.squadNotice=1.1;
+  if(hadEnemies&&!r.enemies.length&&!r.escort&&!r.breakthrough&&!r.boss){
+    r.squadNotice=1.1;
+    r.quickClear=r.clock<r.entryEnd;
+    if(r.quickClear)addScore(r.entryBonus);
+  }
   for(const b of r.bullets){
     if(b.irregular)b.vx=clamp(b.vx+b.bend*dt,-270,270);
     b.x+=b.vx*dt;b.y+=b.vy*dt;
+    if(r.special?.id===2&&(b.x-r.x)**2+(b.y-r.y)**2<friendshipRadius**2)b.dead=true;
   }
+  hitItemCompanions();
   const hit=(x,y,radius)=>Math.abs(x-r.x)<radius&&Math.abs(y-(r.y+1))<radius;
   if(!r.invincible){
-    const bullet=r.bullets.find(b=>hit(b.x,b.y,11));
+    const bullet=r.bullets.find(b=>!b.dead&&hit(b.x,b.y,11));
     if(bullet||r.enemies.some(e=>e.phase==='dive'&&hit(e.x,e.y,19))){
       if(bullet)bullet.dead=true;
       combatSound(run.shield?'block':'hurt');
@@ -1094,7 +1305,7 @@ function update(dt){
       r.invincible=1.35;
       burst(r.x,r.y,0,0);
       if(!r.hp){
-        saveBest();hud();release();state='over';show('비행 종료','점수 '+r.score+' · 최고 '+best,'다시 하기');return;
+        resetItemCompanions();saveBest();hud();release();state='over';show('비행 종료','점수 '+r.score+' · 최고 '+best,'다시 하기');return;
       }
     }
   }
@@ -1103,6 +1314,7 @@ function update(dt){
     d.y+=(r.enemies.length?146:335)*dt;
     if(hit(d.x,d.y,22)){
       d.dead=true;
+      if(d.type==='companion'){collectCompanion(d.id);continue;}
       const levelUp=d.type==='star'&&r.power<maxPower;
       combatSound(levelUp?'level':'pickup');
       if(levelUp)r.levelRing=.42;
@@ -1276,7 +1488,7 @@ function paintEscort(e){
     ctx.fillStyle='#e3cafa';ctx.font='12px system-ui';
     ctx.fillText(Math.max(0,Math.ceil(e.deadline-run.clock))+'초',e.x,e.y+75);
   }
-  if((run.area===3||run.area===5)&&!e.result){
+  if((e.flight||run.area===3||run.area===5)&&!e.result){
     const hit=e.lastHit;
     if(hit&&run.clock-hit.time<.16){
       ctx.strokeStyle='#ff826f';ctx.lineWidth=2;ctx.beginPath();
@@ -1292,9 +1504,14 @@ function paintEscort(e){
 }
 function paintItem(d){
   ctx.save();ctx.translate(d.x,d.y);
-  ctx.fillStyle=itemColors[d.type];ctx.strokeStyle=itemColors[d.type];
-  ctx.shadowBlur=11;ctx.shadowColor=itemColors[d.type];
-  if(d.type==='star'){
+  const color=d.type==='companion'?companions[d.id].color:itemColors[d.type];
+  ctx.fillStyle=color;ctx.strokeStyle=color;
+  ctx.shadowBlur=11;ctx.shadowColor=color;
+  if(d.type==='companion'){
+    ctx.beginPath();ctx.arc(0,0,14,0,Math.PI*2);ctx.fill();
+    ctx.shadowBlur=0;
+    drawSprite(ctx,crewPortraits[d.id],0,0,16,21);
+  }else if(d.type==='star'){
     ctx.beginPath();
     for(let i=0;i<10;i++){
       const a=i*Math.PI/5-Math.PI/2,r=i%2?5:12;
@@ -1320,9 +1537,10 @@ function paintItem(d){
 function paintEntry(e){
   let wait,x,y;
   const clock=run.clock;
-  if(e.arrival&&e.phase==='formation'){
-    wait=Math.max(.4,e.arrival+.55*15/(e.baseY+35))-e.time;
-    x=e.baseX;y=13;
+  if(e.entry){
+    const {delay,fromX,fromY}=e.entry;
+    wait=delay+.24-e.time;
+    x=clamp(fromX,13,W-13);y=clamp(fromY,13,H-13);
   }else if(e.phase==='extra'&&e.kind==='descending'){
     wait=e.row*1.65+e.slot*.19+.35+14/102-run.clock;
     x=62+e.slot*59+Math.sin(e.row*.55)*38*run.extra.side+(e.row%2?14:-14)*run.extra.side;y=13;
@@ -1359,9 +1577,10 @@ function paintCombatNotices(){
   }
   ctx.textAlign='center';
   if(run.squadNotice>0){
+    const notice=run.quickClear?'빠른 격추! · +'+run.entryBonus:'편대 전멸!';
     ctx.font='bold 28px system-ui';ctx.lineWidth=5;ctx.strokeStyle='#281841';ctx.fillStyle='#ffe7a6';
-    ctx.strokeText('편대 전멸!',W/2,294);
-    ctx.fillText('편대 전멸!',W/2,294);
+    ctx.strokeText(notice,W/2,294);
+    ctx.fillText(notice,W/2,294);
   }
   if(run.bossBanner>0){
     ctx.fillStyle='#402752';ctx.fillRect(8,23,W-16,47);
@@ -1369,6 +1588,13 @@ function paintCombatNotices(){
     ctx.fillStyle='#ffe6a6';pixelStar(41,46,6);pixelStar(W-41,46,6);
     ctx.font='bold 23px system-ui';
     ctx.fillText('달그림자 출현!',W/2,55);
+  }
+  if(run.specialNotice>0){
+    const id=run.lastSpecial;
+    ctx.fillStyle='#402752';ctx.fillRect(8,83,W-16,41);
+    ctx.fillStyle=companions[id].color;ctx.fillRect(8,83,W-16,3);
+    ctx.font='bold 19px system-ui';
+    ctx.fillText(companions[id].name+'의 '+specialNames[id]+'!',W/2,110);
   }
 }
 function paint(){
@@ -1538,8 +1764,21 @@ function paint(){
       ctx.fillRect(run.x-2,run.y-29,4,14);
     }
   }
-  if(run.support>0&&(!run.escort||run.boss)){
+  const showWings=run.support>0&&(!run.escort||run.boss);
+  if(showWings){
     for(const [i,id] of run.wings.entries())drawCompanion(wingX(i),run.y+3,companions[id]);
+  }
+  for(const [i,id] of run.escorts.entries()){
+    const x=itemCompanionX(i);
+    if(showWings&&run.wings.some((_,slot)=>wingX(slot)===x))continue;
+    drawCompanion(x,run.y+3,companions[id]);
+  }
+  if(run.special?.id===1){
+    ctx.fillStyle='#ffe375';ctx.fillRect(run.x-9,4,18,run.y-26);
+    ctx.fillStyle='#fff5d3';ctx.fillRect(run.x-3,4,6,run.y-26);
+  }else if(run.special?.id===2){
+    ctx.strokeStyle='#8fd6ff';ctx.lineWidth=3;
+    ctx.beginPath();ctx.arc(run.x,run.y,friendshipRadius,0,Math.PI*2);ctx.stroke();
   }
   if(run.pickup?.time>0){
     ctx.fillStyle=run.pickup.color;ctx.textAlign='center';ctx.font='bold 15px system-ui';
@@ -1569,7 +1808,12 @@ get('action').onclick=()=>{
       const others=run.team.filter(id=>id!==run.selected);
       setWings([run.selected,others[Math.floor(Math.random()*others.length)]]);
       run.stage=4;
-    }else run.score=run.rescueScore;
+    }else{
+      run.score=run.escapeCheckpoint?.score??run.rescueScore;
+      Object.assign(run,snapshotItemCompanions(run.escapeCheckpoint?.companions??run.rescueCompanions));
+      run.special=snapshotSpecial(run.escapeCheckpoint?.special??null);
+      run.specialNotice=run.escapeCheckpoint?.specialNotice??0;
+    }
     wave();hud();state='playing';get('overlay').hidden=true;focusBoard();
     resumeGameAudio();
   }
