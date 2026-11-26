@@ -373,7 +373,7 @@ const doubleDamagePowers = [2,4,6,8];
 const dropMilestones = [2,5,8];
 const straightVolley = [0], guardVolley = [-43,43], satelliteVolley = [-40,40];
 const extraVolleys = [[-36,28],[-55,0,55]];
-const bossVolley = [-75,0,75], bossPortVolley = [-111,-55,0,55,111];
+const bossVolley = [-75,0,75], bossPortVolley = [-111,-74,-37,0,37,74,111];
 const bossFans = [[-110,-55,0,55,110],[-74,-28,32,88],[-125,-84,-34,25,93]];
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const storageKey = 'moonlight-arcade.best.v1';
@@ -546,7 +546,9 @@ function hud(){
   const weaponText=['무기 '+(run.power+1)+' · '+weapons[run.power].name,...effects].join(' · ');
   if(get('weapon').textContent!==weaponText)get('weapon').textContent=weaponText;
   const wingNames=run.wings.map(id=>companions[id].name).join(' · ');
-  const mission=run.extra
+  const mission=run.breakthrough
+    ? breakthroughLabel()
+    : run.extra
     ? (run.extra.kind==='cross'
       ? (run.stage===0?'구역 이동 · 기습 편대':'교차 편대')
       : '방패 편대 · '+(run.extra.broken?'방패 해제!':(run.extra.side<0?'왼쪽':'오른쪽')+' 빈틈 / 빛나는 지휘 별'))
@@ -555,9 +557,7 @@ function hud(){
       (run.escort.flight?'탈출 엄호 '+Math.max(0,Math.ceil(run.escort.duration-run.clock))+'초 · 조준 중인 적 격추':(run.escort.deadline?Math.max(0,Math.ceil(run.escort.deadline-run.clock))+'초 · ':'')+rescueInstructions[run.area-1]))
     : run.boss
       ? (run.area===5?'최종 보스':'중간보스 달그림자')+' · '+(run.boss.open?'핵이 열렸어요!':wingNames||'공격을 피하세요')
-      : run.breakthrough
-        ? '쌍편대 돌파 · '+run.breakthrough.group+'/'+breakthroughCount+' · '+wingNames
-        : run.area+'/5구역 · 편대 '+run.stage+'/2'+(run.support>0?' · '+wingNames+' 지원':'');
+      : run.area+'/5구역 · 편대 '+run.stage+'/'+formationWaves+(run.support>0?' · '+wingNames+' 지원':'');
   if(get('mission').textContent!==mission)get('mission').textContent=mission;
 }
 function show(title, detail, action){
@@ -726,6 +726,7 @@ const combatSounds={
   hurt:[[460,98,.19,.22,'square']],
   rescue:[[520,390,.065,.11],[523,600,.16,.18,'sine',.08],[659,760,.17,.17,'sine',.18],[784,1046,.22,.18,'sine',.28]],
   warning:[[490,620,.12,.15,'sine'],[620,830,.14,.12,'sine',.13]],
+  breakthrough:[[540,710,.10,.13,'triangle'],[810,1060,.13,.14,'triangle',.08]],
   level:[[523,587,.12,.10,'sine'],[659,698,.14,.12,'triangle',.07],[784,880,.18,.12,'sine',.14]],
   siren:[[370,830,.22,.13,'triangle'],[830,430,.22,.11,'sine',.22],[430,690,.18,.08,'triangle',.44]],
   pickup:[[650,880,.095,.11],[880,1320,.14,.13,'triangle',.065]]
@@ -765,7 +766,7 @@ function combatSound(kind,preview=false){
     return;
   }
   const priority=kind==='rescue'?5:kind==='boss'?4:kind==='kill'||kind==='hurt'?3:(kind==='pickup'||kind==='rescue'||kind==='warning')?2:1;
-  if(!preview&&kind!=='level'&&kind!=='siren'&&kind!=='boss'&&now-lastCombatSound<(kind==='kill'?.038:.065)&&priority<=combatPriority)return;
+  if(!preview&&kind!=='level'&&kind!=='siren'&&kind!=='boss'&&kind!=='breakthrough'&&now-lastCombatSound<(kind==='kill'?.038:.065)&&priority<=combatPriority)return;
   lastCombatSound=now;combatPriority=priority;
   if(kind==='kill'||kind==='boss')explosionSound(kind==='boss',now);
   else soundLayers(combatSounds[kind]);
@@ -846,29 +847,40 @@ function advanceArea(){
 function makeBoss(){
   const final=run.area===5;
   const profile=pressure[run.mode];
-  const hp=profile.bossHp[final?1:0];
+  const hp=Math.round(profile.bossHp[final?1:0]*(final?1.6:1.3));
   run.boss={x:W/2,y:final?126:118,hp,maxHp:hp,open:false};
   run.bossBanner=1.2;
   musicSilenceUntil=0;syncBattleTone();combatSound('siren');
   if(final){
-    const sideHp=profile.bossHp[2];
+    const sideHp=Math.round(profile.bossHp[2]*1.3);
     run.satellite={x:46,y:190,hp:sideHp,maxHp:sideHp,lastVolley:-1,warning:false};
   }
 }
-const breakthroughCount=6;
+const formationWaves=3,rescueStage=formationWaves+1;
+const breakthroughRoutes=['s','cross','v','shield','sweep'];
+const breakthroughCount=breakthroughRoutes.length,breakthroughRest=1.2;
+const shieldHealth=[4,6,8];
+function baseFormationSize(area){return area>=4?15:10;}
+function formationSize(area){
+  return Math.round(baseFormationSize(area)*(run.mode===0?1.15:1.35));
+}
+function breakthroughRate(group){return 1+.30*(group-1)/(breakthroughCount-1);}
+function breakthroughSize(group){return Math.round(formationSize(5)*breakthroughRate(group));}
+function breakthroughLabel(){return '돌파 '+run.breakthrough.group+'/'+breakthroughCount;}
+function companionDropChance(){
+  const area=run.area;
+  // Transfer waves, special formations and the final breakthrough also drop companions.
+  const other=(area>1?20:0)+(area===2?20:area===4?14:0);
+  const previousFinalSize=area===5?30:0;
+  const finalSize=area===5?breakthroughRoutes.reduce((total,_,i)=>total+breakthroughSize(i+1),0):0;
+  return .045*(baseFormationSize(area)*2+other+previousFinalSize)/(formationSize(area)*formationWaves+other+finalSize);
+}
 const victoryBursts=[
   [.34,-32,5],[.72,29,-12],[1.08,-16,-19],
   [1.49,35,14],[1.93,-24,15],[2.42,0,0]
 ];
 const victoryDuration=4.15;
 const endingDuration=8.4;
-function breakthroughGroup(group){
-  const r=run,side=group%2?-1:1;
-  r.breakthrough={group,started:r.clock,remaining:5};r.waveWait=.85;r.enemyTimer=r.clock+3.5;
-  for(let slot=0;slot<5;slot++){
-    r.enemies.push({x:side<0?-40:W+40,y:0,row:slot%2,phase:'breakthrough',side,slot,started:r.clock,leadIn:group===1?.55:.12,entered:false,hp:1,squad:r.breakthrough});
-  }
-}
 function moveBreakthrough(e){
   const time=run.clock-e.started;
   const travel=clamp((time-e.leadIn-e.slot*.23)/1.65,0,1);
@@ -883,9 +895,26 @@ function moveBreakthrough(e){
 function addBullet(bullet){
   if(run.bullets.length<maxBullets)run.bullets.push(bullet);
 }
-function fireVolley(x,y,aim,vy,offsets,irregular=false,side=false){
+function fireFormationVolley(x,y,aim,vy,offsets){
+  fireVolley(x,y,aim,vy,offsets,false,false,true);
+}
+function fireAimedShots(x,y,aim,vy,offsets,side=false,scale=false){
+  const rescued=scale?run.team.length:0;
+  const bonus=run.mode===0?Math.floor(rescued/2):rescued;
+  if(!bonus){
+    for(const offset of offsets)addBullet({x,y,vx:aim+offset,vy,side});
+    return;
+  }
+  const count=offsets.length+bonus;
+  const center=Math.atan2(aim,vy),speed=Math.hypot(aim,vy);
+  for(let i=0;i<count;i++){
+    const angle=center+(i-(count-1)/2)*Math.PI/18;
+    addBullet({x,y,vx:Math.sin(angle)*speed,vy:Math.cos(angle)*speed,side});
+  }
+}
+function fireVolley(x,y,aim,vy,offsets,irregular=false,side=false,scale=false){
   const r=run;
-  for(const offset of offsets)addBullet({x,y,vx:aim+offset,vy,side});
+  fireAimedShots(x,y,aim,vy,offsets,side,scale);
   r.volleyCount++;
   if(!irregular&&r.volleyCount%pressure[r.mode].extraEvery!==0)return;
   const drift=Math.random()<.5?-1:1;
@@ -897,16 +926,16 @@ function fireVolley(x,y,aim,vy,offsets,irregular=false,side=false){
 }
 function breakthroughAttack(speed){
   const r=run;
-  if(!r.breakthrough||r.clock<r.enemyTimer)return;
-  const enemies=r.enemies.filter(e=>e.x>14&&e.x<W-14);
-  if(!enemies.length)return;
-  const shooter=enemies[Math.floor(Math.random()*enemies.length)];
+  if(r.enemyTimer>0)return;
+  const firing=r.enemies.filter(e=>!e.entry&&!e.shieldHp&&e.phase!=='dive'&&e.x>14&&e.x<W-14&&e.y>32);
+  if(!firing.length)return;
+  const shooter=firing[Math.floor(Math.random()*firing.length)];
   const vy=192*speed;
-  const aim=(r.x-shooter.x)*vy/(r.y-shooter.y);
-  fireVolley(shooter.x,shooter.y+12,aim,vy,straightVolley);
-  r.enemyTimer=r.clock+Math.max(1.4,2.55-pressure[r.mode].interval);
+  const aim=clamp((r.x-shooter.x)*vy/(r.y-shooter.y),-170,170);
+  fireFormationVolley(shooter.x,shooter.y+12,aim,vy,r.extra?extraVolleys[1]:straightVolley);
+  r.enemyTimer=(1.18-pressure[r.mode].interval)/breakthroughRate(r.breakthrough.group);
 }
-function extraFormation(kind=run.area===2?'cross':'shield'){
+function extraFormation(kind=run.area===2?'cross':'shield',size=20){
   const r=run,cross=kind==='cross',descending=kind==='descending';
   const layout=r.layouts[r.area];
   r.extra={kind,side:r.stage===0?-layout.side:layout.side,variant:layout.variant,broken:false};
@@ -919,14 +948,15 @@ function extraFormation(kind=run.area===2?'cross':'shield'){
     }
   }else if(cross){
     for(let row=0;row<2;row++){
-      for(let slot=0;slot<10;slot++){
+      const slots=row?Math.floor(size/2):Math.ceil(size/2);
+      for(let slot=0;slot<slots;slot++){
         r.enemies.push({x:row?W+24:-24,y:-35,phase:'extra',kind:'cross',row,slot,hp:1});
       }
     }
   }else{
     r.enemies.push({x:180,y:100,phase:'extra',kind:'leader',hp:8+r.mode*2});
     for(let slot=0;slot<5;slot++){
-      r.enemies.push({x:0,y:-35,phase:'extra',kind:'plate',slot,hp:2});
+      r.enemies.push({x:0,y:-35,phase:'extra',kind:'plate',slot,hp:2,shieldHp:shieldHealth[r.mode]});
     }
     for(let row=0;row<2;row++){
       for(let slot=0;slot<4;slot++){
@@ -935,7 +965,7 @@ function extraFormation(kind=run.area===2?'cross':'shield'){
     }
   }
 }
-function moveExtra(e){
+function moveExtra(e,exposedByRow){
   const r=run, f=r.extra;
   if(e.kind==='descending'){
     const age=r.clock-(e.row*1.65+e.slot*.19+.35);
@@ -966,8 +996,7 @@ function moveExtra(e){
       e.x=center+lanes[e.slot]+Math.sin(r.clock*.85+e.slot)*9;
       e.y=(e.slot%2?231:263)+Math.sin(r.clock*1.1+e.slot)*5;
     }else{
-      const remaining=r.enemies.filter(item=>item.kind==='rear'&&!item.dead&&item.row===e.row);
-      const exposed=remaining.reduce((best,item)=>!best||f.side*(item.slot-best.slot)>0?item:best,null);
+      const exposed=exposedByRow[e.row];
       e.open=f.broken||e===exposed;
       e.x=e===exposed&&!f.broken?center+f.side*(114+e.row*9):center+(e.slot-1.5)*37;
       e.y=210-e.row*44;
@@ -977,12 +1006,12 @@ function moveExtra(e){
 function extraAttack(speed){
   const r=run;
   if(!r.extra||r.enemyTimer>0)return;
-  const firing=r.enemies.filter(e=>e.kind!=='plate'&&e.x>14&&e.x<W-14&&e.y>32);
+  const firing=r.enemies.filter(e=>!e.shieldHp&&e.x>14&&e.x<W-14&&e.y>32);
   if(!firing.length)return;
   const e=firing[Math.floor(Math.random()*firing.length)];
   const vy=184*speed;
   const vx=clamp((r.x-e.x)*vy/(r.y-e.y),-125,125);
-  fireVolley(e.x,e.y+14,vx,vy,extraVolleys[r.area===2?0:1]);
+  fireFormationVolley(e.x,e.y+14,vx,vy,extraVolleys[r.area===2?0:1]);
   r.enemyTimer=Math.max(.62,(r.area===2?1.38:1.12)-pressure[r.mode].interval);
 }
 function wave(){
@@ -995,10 +1024,10 @@ function wave(){
     // Each transfer has one two-row crossing wave, before the destination's normal waves.
     extraFormation(run.area===3?'descending':'cross');return;
   }
-  if(run.stage===3&&(run.area===2||run.area===4)&&!run.extraCleared.has(run.area)){
+  if(run.stage===rescueStage&&(run.area===2||run.area===4)&&!run.extraCleared.has(run.area)){
     extraFormation();return;
   }
-  if(run.stage===3){
+  if(run.stage===rescueStage){
     if(run.escapeCheckpoint){startEscape();return;}
     if(!run.lunaEscort)run.rescueScore=run.score;
     run.drops=[];
@@ -1023,27 +1052,40 @@ function wave(){
     }
     return;
   }
-  if(run.area===5&&run.stage===4){
-    run.support=30;run.preview=Math.max(run.preview,6);
-    if(run.power===maxPower)run.bolt=Math.max(run.bolt,6);
-    breakthroughGroup(1);return;
+  const size=formationSize(run.area);
+  const route=['s','v','sweep'][(run.area+run.stage-2)%formationWaves];
+  const group=run.stage-rescueStage;
+  if(run.area===5&&group>0){
+    if(group>breakthroughCount){setWings(run.wings);makeBoss();return;}
+    if(group===1){
+      run.support=30;run.preview=Math.max(run.preview,6);
+      if(run.power===maxPower)run.bolt=Math.max(run.bolt,6);
+    }
+    const entry=breakthroughRoutes[group-1],count=breakthroughSize(group);
+    run.breakthrough={group};
+    if(entry==='cross'||entry==='shield')extraFormation(entry,count);
+    if(entry!=='cross')normalFormation(count-run.enemies.length,entry==='shield'?'v':entry,entry==='shield'?42:89);
+    run.waveWait=breakthroughRest;run.enemyTimer=2.2;
+    combatSound('breakthrough');
+    return;
   }
-  if(run.area===5&&run.stage===5){
-    setWings(run.wings);makeBoss();return;
-  }
-  const rows=run.area>=4?3:2;
-  const route=((run.area-1)*2+run.stage-1)%4;
-  run.entryBonus=rows*5*100*.20;
+  run.entryBonus=size*100*.20;
+  normalFormation(size,route);
+}
+function normalFormation(size,route,top=89){
   const mix=run.area>=3?run.layouts[run.area]:null;
-  for(let row=0;row<rows;row++){
-    for(let column=0;column<5;column++){
-      const x=82+column*49+(mix?mix.side*(row%2?14:-10):0);
-      const y=89+row*48+(mix&&mix.variant?(column%2?9:-5):0);
-      const delay=column*.09+row*.17,duration=1.55;
-      const side=route===0?-1:route===1?1:row%2?1:-1;
-      const fromX=route===2?W/2:side<0?-24:W+24;
-      const fromY=route===2?-24:y+(route===3?18:-42);
-      const entry={route,side,fromX,fromY,delay,duration};
+  for(let row=0;row<Math.ceil(size/5);row++){
+    const columns=Math.min(5,size-row*5);
+    for(let column=0;column<columns;column++){
+      const lane=column-(columns-1)/2;
+      const x=W/2+lane*49+(mix?mix.side*(row%2?14:-10):0);
+      const y=top+row*48+(mix&&mix.variant?(column%2?9:-5):0);
+      const side=run.area%2?-1:1;
+      const order=route==='v'?Math.abs(lane):side<0?column:columns-1-column;
+      const delay=order*.09+row*.17,duration=1.55;
+      const fromX=route==='v'?W/2:side<0?-24:W+24;
+      const fromY=route==='v'?-24:y+(route==='sweep'?18:-42);
+      const entry={route,fromX,fromY,delay,duration};
       run.entryEnd=Math.max(run.entryEnd,delay+duration);
       run.enemies.push({baseX:x,baseY:y,x:fromX,y:fromY,row,phase:'formation',time:0,entry});
     }
@@ -1088,7 +1130,8 @@ function bossAttack(dt,speed){
     const side=cycle%2?-1:1;
     b.x=180+Math.sin(elapsed*1.9)*42;
     const extension=r.satellite?.hp<=0?.35:0;
-    b.open=beat>=1.60+pressure[r.mode].opening*.45-extension;
+    const opensAt=1.60+pressure[r.mode].opening*.45-extension;
+    b.open=beat>=opensAt;
     b.portWarning=beat<.70?side:0;
     if(b.portWarning&&b.warnedCycle!==cycle){
       b.warnedCycle=cycle;combatSound('warning');
@@ -1099,6 +1142,7 @@ function bossAttack(dt,speed){
       const aim=clamp((r.x-x)*vy/(r.y-b.y),-160,160);
       fireVolley(x,b.y+22,aim,vy,bossPortVolley,true);
     }
+    if(!b.open)bossSpiral(b,elapsed,opensAt-beat,speed);
     return;
   }
   const phase=r.clock%4;
@@ -1111,6 +1155,23 @@ function bossAttack(dt,speed){
   const aim=clamp((r.x-b.x)*vy/(r.y-b.y),-170,170);
   const pattern=final?bossFans[Math.floor(Math.random()*bossFans.length)]:bossVolley;
   fireVolley(b.x,b.y+26,aim,vy,pattern,final);
+}
+function bossSpiral(b,elapsed,closedFor,speed){
+  const duration=.42,count=run.mode===0?10:16;
+  const scheduled=b.nextSpiral??3;
+  if(!b.spiral&&elapsed>=scheduled&&closedFor>=duration+.032){
+    b.spiral={started:elapsed,angle:Math.PI/2+elapsed*.65,shot:0};
+    b.nextSpiral=scheduled+3;
+  }
+  const spiral=b.spiral;
+  if(!spiral)return;
+  const due=Math.min(count,1+Math.floor((elapsed-spiral.started)*count/duration));
+  while(spiral.shot<due){
+    const angle=spiral.angle+spiral.shot++*2*Math.PI/count;
+    const velocity=164*speed;
+    addBullet({x:b.x,y:b.y+22,vx:Math.cos(angle)*velocity,vy:Math.sin(angle)*velocity,spiral:true});
+  }
+  if(spiral.shot===count)b.spiral=null;
 }
 function bossReinforcements(){
   const r=run,b=r.boss;
@@ -1174,7 +1235,7 @@ function moveGuards(){
     guard.fires=r.clock+(r.area===1?2.3:1.55)-pressure[r.mode].interval;
     const vy=(r.area===1?180:230)*(1+pressure[r.mode].speed*.65);
     const aim=(r.x-guard.x)*vy/(r.y-guard.y);
-    for(const offset of r.area===1?straightVolley:guardVolley)addBullet({x:guard.x,y:guard.y,vx:aim+offset,vy});
+    fireAimedShots(guard.x,guard.y,aim,vy,r.area===1?straightVolley:guardVolley,false,true);
   }
 }
 function cageThreats(){
@@ -1268,7 +1329,7 @@ function snapshotSpecial(special){
 }
 function dropCompanion(target){
   const r=run;
-  if(!r.team.length||r.drops.some(d=>d.type==='companion')||Math.random()>=.045)return;
+  if(!r.team.length||r.drops.some(d=>d.type==='companion')||Math.random()>=companionDropChance())return;
   const available=r.team.filter(id=>!r.escorts.includes(id));
   const pool=available.length?available:r.team;
   r.drops.push({x:target.x,y:target.y,type:'companion',id:pool[Math.floor(Math.random()*pool.length)]});
@@ -1416,8 +1477,18 @@ function hitEnemy(r,s,target){
     if(target.hp>0){target.whiteFrames=2;combatSound('hit');burst(target.x,target.y,1,0,s.style?.color);return;}
   }
   if(target.phase==='extra'){
-    const blocked=target.kind==='plate'&&!r.extra.broken||
-      (target.kind==='leader'||target.kind==='rear')&&!target.open;
+    if(target.shieldHp>0){
+      target.shieldHp--;
+      target.whiteFrames=2;
+      if(target.shieldHp===0){
+        addScore(50);combatSound('kill');
+        burst(target.x,target.y,1,50,'#9aaeea','shield');
+      }else{
+        combatSound('block');burst(target.x,target.y,0,0,'#bdc8ff');
+      }
+      return;
+    }
+    const blocked=(target.kind==='leader'||target.kind==='rear')&&!target.open;
     if(blocked){
       if(!target.hitUntil||target.hitUntil<r.clock){
         target.hitUntil=r.clock+.15;combatSound('block');burst(target.x,target.y,0,0,'#bdc8ff');
@@ -1429,8 +1500,8 @@ function hitEnemy(r,s,target){
     const lastRear=target.kind==='rear'&&!r.enemies.some(e=>e!==target&&!e.dead&&e.kind==='rear');
     if((target.kind==='leader'||lastRear)&&!r.extra.broken){
       r.extra.broken=true;
-      for(const plate of r.enemies.filter(e=>e.kind==='plate')){
-        plate.dead=true;burst(plate.x,plate.y,1,0,'#9aaeea');
+      for(const plate of r.enemies.filter(e=>e.shieldHp>0)){
+        plate.shieldHp=0;burst(plate.x,plate.y,1,0,'#9aaeea','shield');
       }
       r.pickup={text:'방패 편대 해제!',color:'#ffe9a6',time:1.1};
     }
@@ -1450,7 +1521,6 @@ function hitEnemy(r,s,target){
     target.whiteFrames=1;
     r.hitGhosts.push(target);
   }
-  if(target.squad&&--target.squad.remaining===0)r.squadNotice=1.1;
   const diving=target.phase==='dive';
   const points=diving?180:100;
   addScore(points);
@@ -1508,10 +1578,18 @@ function update(dt){
     shotSound(power,r.bolt>0);
   }
   const speed=1+Math.min(8,Math.max(0,r.area-2))*.075+pressure[r.mode].speed;
+  const exposedByRow=[];
+  if(r.extra?.kind==='shield'&&!r.extra.broken){
+    for(const e of r.enemies){
+      if(e.kind!=='rear'||e.dead)continue;
+      const exposed=exposedByRow[e.row];
+      if(!exposed||r.extra.side*(e.slot-exposed.slot)>0)exposedByRow[e.row]=e;
+    }
+  }
   for(const e of r.enemies){
     if(e.phase==='escort')continue;
     if(e.phase==='breakthrough'){moveBreakthrough(e);continue;}
-    if(e.phase==='extra'){moveExtra(e);continue;}
+    if(e.phase==='extra'){moveExtra(e,exposedByRow);continue;}
     e.time+=dt;
     const fx=e.baseX+Math.sin(r.clock*1.7*speed)*40;
     const fy=e.baseY+Math.sin(r.clock*2+e.row)*6;
@@ -1521,8 +1599,8 @@ function update(dt){
       if(t<1){
         e.x=fromX+(fx-fromX)*t;
         e.y=fromY+(fy-fromY)*t;
-        if(route<2)e.y+=Math.sin(t*Math.PI*2)*43;
-        if(route===2)e.x=fromX+(fx-fromX)*t*t;
+        if(route==='s')e.y+=Math.sin(t*Math.PI*2)*43;
+        if(route==='v')e.x=fromX+(fx-fromX)*t*t;
         continue;
       }
       e.entry=null;
@@ -1546,17 +1624,17 @@ function update(dt){
   bossAttack(dt,speed);
   satelliteAttack(speed);
   bossReinforcements();
-  breakthroughAttack(speed);
-  extraAttack(speed);
+  if(r.breakthrough)breakthroughAttack(speed);
+  else extraAttack(speed);
   moveGuards();
   wingSupport(dt);
   const formation=r.enemies.filter(e=>e.phase==='formation'&&e.y>0&&!e.entry);
-  if(r.enemyTimer<=0&&formation.length){
+  if(!r.breakthrough&&r.enemyTimer<=0&&formation.length){
     r.enemyTimer=Math.max(r.mode===2?.65:.51,1.13-Math.max(0,r.area-2)*.055-pressure[r.mode].interval);
     const e=formation[Math.floor(Math.random()*formation.length)];
     const vy=210*speed;
     const vx=r.level>=2?clamp((r.x-e.x)*vy/(r.y-e.y),-170,170):0;
-    fireVolley(e.x,e.y+10,vx,vy,straightVolley);
+    fireFormationVolley(e.x,e.y+10,vx,vy,straightVolley);
   }
   if(r.diveTimer<=0&&r.area>=2&&formation.length&&!r.enemies.some(e=>e.phase==='warning'||e.phase==='dive')){
     r.diveTimer=Math.max(2.4,4.6-(r.area-2)*.2);
@@ -1629,6 +1707,7 @@ function update(dt){
   r.shots=r.shots.filter(s=>!s.dead&&s.y>-20&&s.x>-20&&s.x<W+20);
   const hadEnemies=r.enemies.length>0;
   r.enemies=r.enemies.filter(e=>!e.dead);
+  if(hadEnemies&&!r.enemies.length&&r.breakthrough)r.bullets=[];
   if(hadEnemies&&!r.enemies.length&&!r.escort&&!r.breakthrough&&!r.boss){
     r.squadNotice=1.1;
     r.quickClear=r.clock<r.entryEnd;
@@ -1682,16 +1761,13 @@ function update(dt){
   }
   r.drops=r.drops.filter(d=>!d.dead&&d.y<H+18);
   r.sparks=r.sparks.filter(s=>(s.t-=dt)>0);
-  if(r.breakthrough&&r.breakthrough.group<breakthroughCount&&(r.clock-r.breakthrough.started>=4||!r.enemies.some(e=>!e.dead))){
-    breakthroughGroup(r.breakthrough.group+1);
-  }
   if(r.escort){
     cageThreats();escortStep();
   }
   else if(!r.enemies.length&&!(r.boss?.hp>0)){
-    if((!r.breakthrough||r.breakthrough.group===breakthroughCount)&&(r.boss||!r.drops.some(d=>d.y<r.y+22)))r.waveWait-=dt;
+    if(r.breakthrough||r.boss||!r.drops.some(d=>d.y<r.y+22))r.waveWait-=dt;
     if(r.waveWait<=0){
-      if(r.extra){
+      if(r.extra&&!r.breakthrough){
         if(r.stage===0){r.stage=1;r.level++;}
         else r.extraCleared.add(r.area);
         wave();
@@ -1931,12 +2007,12 @@ function paintCombatNotices(){
     ctx.strokeText(notice,W/2,294);
     ctx.fillText(notice,W/2,294);
   }
-  if(run.bossBanner>0){
+  if(run.bossBanner>0||(run.breakthrough&&run.clock<1)){
     ctx.fillStyle='#402752';ctx.fillRect(8,23,W-16,47);
     ctx.strokeStyle='#e9b5f4';ctx.lineWidth=2;ctx.strokeRect(9,24,W-18,45);
     ctx.fillStyle='#ffe6a6';pixelStar(41,46,6);pixelStar(W-41,46,6);
     ctx.font='bold 23px system-ui';
-    ctx.fillText('달그림자 출현!',W/2,55);
+    ctx.fillText(run.breakthrough?breakthroughLabel():'달그림자 출현!',W/2,55);
   }
   if(run.specialNotice>0){
     const id=run.lastSpecial;
@@ -1967,7 +2043,7 @@ function paint(){
     if(run.extra.kind==='shield'){
       ctx.fillText('방패 편대',W/2,330);
       ctx.font='14px system-ui';ctx.fillStyle='#dbc9f5';
-      ctx.fillText('옆의 노출된 별부터 또는 빛나는 지휘 별을 공격',W/2,354);
+      ctx.fillText('방패를 깨거나 빛나는 지휘 별을 공격',W/2,354);
     }
   }
   for(const e of run.enemies){
@@ -2000,9 +2076,20 @@ function paint(){
       ctx.fillRect(e.x-15,e.y-24,30*clamp((e.fires-run.clock)/1.55,0,1),3);
       continue;
     }
-    if(e.phase==='extra'&&e.kind==='plate'){
-      drawSprite(ctx,enemiesArt.shield,e.x,e.y,30,27);
-      if(e.hitUntil>run.clock){ctx.strokeStyle='#fff2c2';ctx.strokeRect(e.x-14,e.y-13,28,26);}
+    if(e.shieldHp>0){
+      enemySprite(enemiesArt.shield,e,30,27);
+      const ratio=e.shieldHp/shieldHealth[run.mode];
+      if(ratio<=2/3){
+        ctx.strokeStyle=e.whiteFrames?'#63567d':'#fff2c2';
+        ctx.lineWidth=1.5;ctx.beginPath();
+        ctx.moveTo(e.x+2,e.y-10);ctx.lineTo(e.x-3,e.y-3);
+        ctx.lineTo(e.x+1,e.y+1);ctx.lineTo(e.x-5,e.y+8);
+        if(ratio<=1/3){
+          ctx.moveTo(e.x-3,e.y-3);ctx.lineTo(e.x-10,e.y-5);
+          ctx.moveTo(e.x+1,e.y+1);ctx.lineTo(e.x+7,e.y+2);ctx.lineTo(e.x+10,e.y+7);
+        }
+        ctx.stroke();
+      }
       continue;
     }
     if(e.phase==='extra'&&e.kind==='leader'){
@@ -2093,7 +2180,7 @@ function paint(){
   }
   ctx.globalAlpha=1;
   for(const b of run.bullets){
-    ctx.fillStyle=b.irregular?'#ef81d0':'#ff806f';ctx.fillRect(b.x-4,b.y-5,8,10);
+    ctx.fillStyle=b.spiral?'#a28cff':b.irregular?'#ef81d0':'#ff806f';ctx.fillRect(b.x-4,b.y-5,8,10);
     ctx.fillStyle=b.irregular?'#fff0f4':'#ffe0b0';ctx.fillRect(b.x-2,b.y-3,4,5);
     if(b.irregular){
       ctx.fillStyle='#ae538e';ctx.fillRect(b.x-b.vx*.033-1,b.y-9,3,4);
@@ -2156,7 +2243,7 @@ get('action').onclick=()=>{
     if(state==='finalSelect'){
       const others=run.team.filter(id=>id!==run.selected);
       setWings([run.selected,others[Math.floor(Math.random()*others.length)]]);
-      run.stage=4;
+      run.stage=rescueStage+1;
     }else{
       run.score=run.escapeCheckpoint?.score??run.rescueScore;
       Object.assign(run,snapshotItemCompanions(run.escapeCheckpoint?.companions??run.rescueCompanions));
