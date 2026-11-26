@@ -17,6 +17,10 @@ const clearKey='moonlight-arcade.campaign-clear.v1';
 let cleared=false,mode=0;
 try{cleared=localStorage.getItem(clearKey)==='1';}catch{}
 const difficulties=['쉬움','보통','어려움'];
+const bestKeys=difficulties.map(difficulty=>'moonlight-arcade.best.'+difficulty+'.v1');
+const difficultyBests=bestKeys.map(key=>{
+  try{return Math.max(0,Number(localStorage.getItem(key))||0);}catch{return 0;}
+});
 const pressure=[
   {speed:0,interval:0,opening:0,extraEvery:4,bossHp:[17,33,10]},
   {speed:.23,interval:.24,opening:.49,extraEvery:3,bossHp:[24,44,15]},
@@ -157,7 +161,7 @@ function vibrate(pattern){
   }
 }
 let soundOn=true,musicVolume=33,effectsVolume=78,audioContext,effectsBus;
-let resumeAfterSound=false,lastCombatSound=-Infinity,combatPriority=0,blastUntil=0,blastVariant=0,nextSweepBlast=0;
+let resumeAfterSound=false,audioRetry=false,audioAttempt=0,lastCombatSound=-Infinity,combatPriority=0,blastUntil=0,blastVariant=0,nextSweepBlast=0;
 try{
   soundOn=localStorage.getItem(soundKey)!=='off';
   const levels=JSON.parse(localStorage.getItem(soundKey+'.levels'));
@@ -170,16 +174,21 @@ function saveSound(){
     localStorage.setItem(soundKey+'.levels',JSON.stringify({music:musicVolume,effects:effectsVolume}));
   }catch{}
 }
-function syncSound(){
-  get('sound').textContent=soundOn?'소리 켬':'소리 끔';
+function showSoundButton(){
+  const button=get('sound');
+  button.textContent=audioRetry&&soundOn?'소리 켜기':soundOn?'소리 켬':'소리 끔';
+  button.setAttribute('aria-label',audioRetry&&soundOn?'소리 켜기':'게임 소리 설정');
+}
+function syncSound(onFailure=()=>{}){
+  showSoundButton();
   battleMusic.volume=soundOn?musicVolume/100*.65:0;
   if(effectsBus)effectsBus.gain.value=soundOn?effectsVolume/100:0;
   const playing=state==='playing'||(resumeAfterSound&&get('soundPanel').open);
   if(soundOn&&musicVolume>0&&playing&&!document.hidden){
-    if(battleMusic.paused)battleMusic.play().catch(()=>{});
+    if(battleMusic.paused)battleMusic.play().catch(onFailure);
   }else battleMusic.pause();
 }
-function activateSound(){
+function activateSound(onFailure=()=>{}){
   if(!soundOn)return;
   const Context=window.AudioContext||window.webkitAudioContext;
   if(Context&&!audioContext){
@@ -188,9 +197,18 @@ function activateSound(){
       effectsBus=audioContext.createGain();
       const limiter=audioContext.createDynamicsCompressor();
       effectsBus.connect(limiter);limiter.connect(audioContext.destination);
-    }catch{}
+    }catch{onFailure();}
   }
-  if(audioContext?.state==='suspended')audioContext.resume().catch(()=>{});
+  if(audioContext&&audioContext.state!=='running')audioContext.resume().catch(onFailure);
+}
+function resumeGameAudio(){
+  const attempt=++audioAttempt;
+  audioRetry=false;
+  const onFailure=()=>{
+    if(attempt!==audioAttempt||state!=='playing'||!soundOn)return;
+    audioRetry=true;showSoundButton();
+  };
+  activateSound(onFailure);syncSound(onFailure);
 }
 function showSoundLevels(){
   get('musicVolume').value=musicVolume;get('musicValue').value=musicVolume+'%';
@@ -201,6 +219,7 @@ function showSoundLevels(){
   get('vibrationToggle').hidden=typeof navigator==='undefined'||typeof navigator.vibrate!=='function';
 }
 get('sound').onclick=()=>{
+  if(audioRetry){audioRetry=false;showSoundButton();}
   const panel=get('soundPanel');
   if(panel.open)return;
   resumeAfterSound=state==='playing';
@@ -313,9 +332,11 @@ function combatSound(kind,preview=false){
   else soundLayers(combatSounds[kind]);
 }
 function home(){
+  audioAttempt++;audioRetry=false;
   state='home';release();syncSound();battleMusic.currentTime=0;
   get('home').hidden=false;get('game').hidden=true;
   get('record').textContent='최고점 '+best;
+  window.moonlightArcade.showRabbitRecords(difficultyBests,perfectRescues);
   get('difficulty').hidden=true;
   get('home').inert=false;
   get('album').textContent='구조 도감 '+companions.filter((_,id)=>unlocked.has(id)).length+'/5';
@@ -368,6 +389,7 @@ function recruit(){
   if(run.team.includes(id))return;
   run.team.push(id);run.rescued=true;
   addScore(300);unlock(id);
+  saveBest();
   if(!run.rescueMistakes.has(run.area)){
     perfectRescues.add(id);
     try{localStorage.setItem(challengeKey,JSON.stringify([...perfectRescues]));}catch{}
@@ -529,11 +551,12 @@ function wave(){
     extraFormation();return;
   }
   if(run.stage===3){
+    if(!run.lunaEscort)run.rescueScore=run.score;
     run.drops=[];
     run.escort={x:W/2,y:221,result:'',end:0,launched:0,
       deadline:run.area===2?23:run.area===4?17.55:0,
       flight:run.area===5&&Boolean(run.lunaEscort),
-      hearts:run.area===3||run.area===5?3:0,nextThreat:4.2,threatCount:0};
+      hearts:run.area===3||run.area===5?3:0,nextThreat:run.area===3&&run.mode===1?5:4.2,threatCount:0};
     const target=(x,kind,hp)=>({x,y:164,baseX:x,phase:'escort',kind,
       fires:x<W/2?2.45:3.6,hp,hitUntil:0});
     if(run.area===1)run.enemies=[target(91,'guard',3),target(269,'guard',3)];
@@ -585,9 +608,18 @@ function unlock(id){
 }
 function addScore(points){
   run.score+=points;
-  if(run.score<=best)return;
-  best=run.score;
-  try{localStorage.setItem(storageKey,String(best));}catch{}
+  if(!run.escort||run.escort.result)saveBest();
+}
+function saveBest(){
+  const {score,mode}=run;
+  if(score>best){
+    best=score;
+    try{localStorage.setItem(storageKey,String(best));}catch{}
+  }
+  if(score>difficultyBests[mode]){
+    difficultyBests[mode]=score;
+    try{localStorage.setItem(bestKeys[mode],String(score));}catch{}
+  }
 }
 function bossAttack(dt,speed){
   const r=run,b=r.boss;
@@ -614,7 +646,7 @@ function bossAttack(dt,speed){
   const phase=r.clock%4;
   const opening=r.satellite&&r.satellite.hp<=0?.9:1.6;
   const profile=pressure[r.mode],final=r.area===5;
-  b.open=phase>=opening+profile.opening;
+  b.open=phase>=(r.area===3&&r.mode===1?1.9:opening+profile.opening);
   if(b.open||r.enemyTimer>0)return;
   r.enemyTimer=Math.max(.40,.73-Math.max(0,r.area-2)*.03-profile.interval);
   const vy=175*speed;
@@ -721,7 +753,7 @@ function escortStep(){
   const pending=r.area===2?live('lock'):r.area===4?live('runner'):
     e.flight?r.clock<9.8:r.enemies.some(unit=>unit.kind!=='cageThreat'&&!unit.dead)||r.boss?.hp>0;
   if(r.area===5&&!e.flight&&!pending&&e.hearts>0){
-    r.lunaEscort=true;r.escortHearts=Math.max(1,e.hearts);wave();return;
+    r.lunaEscort=true;r.escortHearts=Math.max(1,e.hearts);r.rescueScore=r.score;wave();return;
   }
   const lost=(r.area===3||r.area===5)&&e.hearts<=0;
   if(pending||lost){
@@ -747,8 +779,6 @@ function wingX(i=0){
 }
 function beginEnding(){
   release();state='ending';run.ending=0;
-  cleared=true;
-  try{localStorage.setItem(clearKey,'1');}catch{}
   get('overlay').hidden=true;
 }
 function updateVictory(dt){
@@ -845,7 +875,7 @@ function update(dt){
   }
   const formation=r.enemies.filter(e=>e.phase==='formation'&&e.y>0&&(!e.arrival||e.time>=e.arrival+.55));
   if(r.enemyTimer<=0&&formation.length){
-    r.enemyTimer=Math.max(.51,1.13-Math.max(0,r.area-2)*.055-pressure[r.mode].interval);
+    r.enemyTimer=Math.max(r.mode===2?.65:.51,1.13-Math.max(0,r.area-2)*.055-pressure[r.mode].interval);
     const e=formation[Math.floor(Math.random()*formation.length)];
     const vy=210*speed;
     const vx=r.level>=2?clamp((r.x-e.x)*vy/(r.y-e.y),-170,170):0;
@@ -884,6 +914,10 @@ function update(dt){
           r.pickup={text:'포대 전개!',color:'#ffc58c',time:1.2};
         }
         if(boss.hp===0){
+          if(r.area===5){
+            cleared=true;
+            try{localStorage.setItem(clearKey,'1');}catch{}
+          }
           addScore(750);combatSound('boss');
           burst(boss.x,boss.y,2,750);r.flash=.13;
           r.bullets=[];r.waveWait=.7;
@@ -971,7 +1005,7 @@ function update(dt){
       r.invincible=1.35;
       burst(r.x,r.y,0,0);
       if(!r.hp){
-        hud();release();state='over';show('비행 종료','점수 '+r.score+' · 최고 '+best,'다시 하기');return;
+        saveBest();hud();release();state='over';show('비행 종료','점수 '+r.score+' · 최고 '+best,'다시 하기');return;
       }
     }
   }
@@ -980,13 +1014,14 @@ function update(dt){
     d.y+=(r.enemies.length?146:335)*dt;
     if(hit(d.x,d.y,22)){
       d.dead=true;combatSound('pickup');
+      const gainsShield=d.type==='star'&&r.power===maxPower;
       if(d.type==='bolt')r.bolt=6;
       else if(d.type==='comet'){r.comet=6;r.cometShot=0;}
       else if(d.type==='preview')r.preview=5;
       else if(r.power<maxPower)r.power++;
       else r.shield=true;
       r.pickup={
-        text:d.type==='star'?(r.power===maxPower&&r.shield?'보호막 획득':'무기 Lv. '+(r.power+1)):itemLabels[d.type],
+        text:d.type==='star'?(gainsShield?'보호막 획득':'무기 Lv. '+(r.power+1)):itemLabels[d.type],
         color:itemColors[d.type],time:.95
       };
       burst(r.x,r.y,1,0,itemColors[d.type]);
@@ -1311,15 +1346,19 @@ get('action').onclick=()=>{
       const others=run.team.filter(id=>id!==run.selected);
       setWings([run.selected,others[Math.floor(Math.random()*others.length)]]);
       run.stage=4;
-    }
+    }else run.score=run.rescueScore;
     wave();hud();state='playing';get('overlay').hidden=true;focusBoard();
+    resumeGameAudio();
   }
-  else if(state==='paused'){state='playing';get('overlay').hidden=true;focusBoard();}
+  else if(state==='paused'){
+    state='playing';get('overlay').hidden=true;focusBoard();resumeGameAudio();
+  }
 };
 board.onpointerdown=e=>{
   if(state!=='playing'||drag)return;
   focusBoard();
-  if(e.pointerType==='touch'){
+  const {width,height}=board.getBoundingClientRect();
+  if(e.pointerType==='touch'&&width&&height){
     const rect=board.getBoundingClientRect();
     const fingerY=(e.clientY-rect.top)*H/rect.height;
     const fingerX=(e.clientX-rect.left)*W/rect.width;
@@ -1328,13 +1367,24 @@ board.onpointerdown=e=>{
       run.y=clamp(Math.min(run.y,fingerY-clearance),minY,maxY);
     }
   }
-  drag={id:e.pointerId,x:e.clientX,y:e.clientY,shipX:run.x,shipY:run.y};
+  drag={id:e.pointerId,x:e.clientX,y:e.clientY,lastX:e.clientX,lastY:e.clientY,
+    shipX:run.x,shipY:run.y,width,height};
   board.setPointerCapture(e.pointerId);
 };
+function resizeDrag(){
+  if(!drag)return;
+  const {width,height}=board.getBoundingClientRect();
+  if(width===drag.width&&height===drag.height)return;
+  Object.assign(drag,{width,height,x:drag.lastX,y:drag.lastY,shipX:run.x,shipY:run.y});
+}
+new ResizeObserver(resizeDrag).observe(board);
 board.onpointermove=e=>{
   if(drag?.id===e.pointerId&&state==='playing'){
-    run.x=clamp(drag.shipX+(e.clientX-drag.x)*W/board.clientWidth,22,W-22);
-    run.y=clamp(drag.shipY+(e.clientY-drag.y)*H/board.clientHeight,minY,maxY);
+    resizeDrag();
+    if(!drag.width||!drag.height)return;
+    drag.lastX=e.clientX;drag.lastY=e.clientY;
+    run.x=clamp(drag.shipX+(e.clientX-drag.x)*W/drag.width,22,W-22);
+    run.y=clamp(drag.shipY+(e.clientY-drag.y)*H/drag.height,minY,maxY);
   }
 };
 board.onlostpointercapture=board.onpointerup=board.onpointercancel=e=>{

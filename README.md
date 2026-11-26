@@ -11,3 +11,8 @@
 브라우저 탭과 홈 화면용 아이콘이 연결되어 있습니다. 아이콘 원본 크기 파일은 `assets/icons/icon-1024.png`입니다.
 
 홈에서는 같은 게임 카드를 두 번 눌러 시작합니다. 별빛 블록의 단계 테스트는 일시정지 메뉴에서 열 수 있습니다.
+
+## 오프라인판 다시 만들기
+
+원본(index.html, js/, assets/)을 고친 뒤 `node build_offline.js` 또는 `python3 build_offline.py`를 실행합니다. Node판은 단계 테스트판도 함께 만듭니다.
+

@@ -90,7 +90,7 @@ function musicPressure() {
   const beat = Math.floor(music.currentTime/musicBeatLength);
   if (beat === musicBeat) return;
   musicBeat = beat;
-  if (!pressured || audio?.state !== 'running') return;
+  if (!pressured || record.muted || audio?.state !== 'running') return;
   const clock = audio.currentTime;
   const pulse = audio.createOscillator();
   const envelope = audio.createGain();
@@ -341,6 +341,7 @@ function contactFloor() {
     state.contacted = false;
   } else if (!state.contacted) {
     state.contacted = true;
+    state.elapsed = 0;
     showLanding(state.active);
     landingSound(false,false);
   }
@@ -362,12 +363,14 @@ function planAttacks(level) {
 }
 function attackWarning() {
   const attack = state.attacks[0];
-  return attack ? (attack.at-state.placements)+'블록 뒤 +'+attack.rows.length+'줄' : '';
+  return attack ? Math.max(1,attack.at-state.placements)+'블록 뒤 +'+attack.rows.length+'줄' : '';
 }
 function riseDue() {
   let risen = 0;
-  while (state.attacks[0]?.at <= state.placements) {
-    const {rows} = state.attacks.shift();
+  while (risen < 3 && state.attacks[0]?.at <= state.placements) {
+    const attack = state.attacks[0];
+    const rows = attack.rows.splice(0,3-risen);
+    if (!attack.rows.length) state.attacks.shift();
     if (state.board.slice(0,rows.length).some(row => row.some(Boolean))) {
       state.active = null;
       finish();
@@ -391,6 +394,8 @@ function riseDue() {
 }
 function locked(hard = false, distance = 0) {
   const {active, board} = state;
+  pointer = null;
+  state.elapsed = 0;
   for (const [x,y] of active.cells) board[active.y+y][active.x+x] = active.type;
   const full = [];
   board.forEach((row,y) => { if (row.every(Boolean)) full.push(y); });
@@ -429,9 +434,10 @@ function locked(hard = false, distance = 0) {
     const earned = full.length >= 2 || Math.floor(state.combo/3) > Math.floor(previousCombo/3);
     const charged = earned && state.charge < 5;
     if (charged) {
-      state.charge++;
-      if (state.charge === 3) toast('세로 삭제 준비! 5개를 모으면 십자 삭제');
+      const previousCharge = state.charge;
+      state.charge = Math.min(5,state.charge + (full.length === 4 ? 2 : 1));
       if (state.charge === 5) toast('십자 삭제 준비!');
+      else if (previousCharge < 3 && state.charge >= 3) toast('세로 삭제 준비! 5개를 모으면 십자 삭제');
     }
     state.level = Math.min(fallTimes.length,1+Math.floor(state.lines/6));
     state.board = board.filter((_,y) => !full.includes(y));
@@ -491,8 +497,9 @@ function action(name, manual = true) {
     if (next.type === 'O') return;
     const pivot = next.type === 'I' ? 3 : 2;
     next.cells = next.cells.map(([x,y]) => name === 'reverse' ? [y,pivot-x] : [pivot-y,x]);
-    const kick = [[0,0],[-1,0],[1,0],[-2,0],[2,0],[0,-1],[-1,-1],[1,-1]]
-      .find(([x,y]) => valid({...next,x:next.x+x,y:next.y+y}));
+    const kicks = [[0,0],[-1,0],[1,0],[-2,0],[2,0],[0,-1],[-1,-1],[1,-1]];
+    if (next.type === 'I') kicks.push([0,-2],[-1,-2],[1,-2],[-2,-2],[2,-2]);
+    const kick = kicks.find(([x,y]) => valid({...next,x:next.x+x,y:next.y+y}));
     if (!kick) return;
     next.x += kick[0]; next.y += kick[1];
   }
@@ -502,6 +509,7 @@ function action(name, manual = true) {
     state.resets++;
   }
   if (manual) state.motion = {piece:state.active, name, start:performance.now()};
+  if (pointer && pointer.piece === state.active) pointer.piece = next;
   state.active = next;
   contactFloor();
   if ((name === 'down' || name === 'nudge') && manual && !state.contacted && !record.muted) {
@@ -930,10 +938,11 @@ function tick(now) {
       state.lockTime += delta;
       if (state.lockTime >= 385) locked();
     } else if (!flying) {
-      state.lockTime = 0;
+      if (state.resets < 8) state.lockTime = 0;
       state.elapsed += delta;
-      if (state.elapsed >= fallInterval(state.level)) {
-        state.elapsed = 0;
+      const interval = fallInterval(state.level);
+      if (state.elapsed >= interval) {
+        state.elapsed -= interval;
         action('down',false);
       }
     }
@@ -1062,14 +1071,14 @@ canvas.onpointerdown = event => {
     selectTarget(x,y);
     return;
   }
-  if (!['play','lesson'].includes(state.mode)) return;
+  if (!['play','lesson'].includes(state.mode) || !state.active || state.dropFlight) return;
   closePowers();
   canvas.setPointerCapture?.(event.pointerId);
-  pointer = {id:event.pointerId,x:event.clientX,y:event.clientY,axis:null,
+  pointer = {id:event.pointerId,piece:state.active,x:event.clientX,y:event.clientY,axis:null,
     step:Math.max(11,rect.width/width*.72)};
 };
 function moveGesture(event) {
-  if (event.pointerId !== pointer?.id) return;
+  if (!pointer || event.pointerId !== pointer.id || pointer.piece !== state.active) return;
   const dx = event.clientX-pointer.x, dy = event.clientY-pointer.y;
   if (!pointer.axis && Math.max(Math.abs(dx),Math.abs(dy)) >= 8) {
     pointer.axis = Math.abs(dx)>=Math.abs(dy) ? 'horizontal' : 'vertical';
@@ -1084,7 +1093,7 @@ function moveGesture(event) {
 }
 canvas.onpointermove = moveGesture;
 canvas.onpointerup = event => {
-  if (event.pointerId !== pointer?.id) return;
+  if (!pointer || event.pointerId !== pointer.id || pointer.piece !== state.active) return;
   moveGesture(event);
   const {axis,downDistance,step} = pointer;
   pointer = null;

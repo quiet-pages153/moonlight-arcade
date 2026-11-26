@@ -47,7 +47,7 @@ main:has(#home:not([hidden])){border-inline:0}
 .homeHero .signArt{position:relative;z-index:1}
 .visuallyHidden{position:absolute;width:1px;height:1px;margin:-1px;clip-path:inset(50%);overflow:hidden;white-space:nowrap}
 .signArt,.entranceArt{display:block;width:100%;height:auto;flex:none;object-fit:contain}
-.tiles{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;padding:4px 7px 10px;grid-auto-rows:clamp(100px,16.25dvh,144px);
+.tiles{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;padding:4px 7px 4px;grid-auto-rows:clamp(100px,16.25dvh,144px);
 background:transparent}
 .tile{position:relative;isolation:isolate;min-width:0;min-height:104px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;
 padding:8px 3px;border:0;border-radius:0;color:#d6b7e9;line-height:1.15;font-weight:850;font-size:clamp(12px,4vw,20px);background:#8263ae;
@@ -61,8 +61,13 @@ padding:8px 3px;border:0;border-radius:0;color:#d6b7e9;line-height:1.15;font-wei
  .tile[aria-pressed="true"]:active::before{filter:brightness(.95)}
 .tileArt{display:block;width:68%;height:clamp(32px,6.5dvh,60px);object-fit:contain;image-rendering:auto}
  .tile[aria-pressed="true"] .tileArt{height:clamp(44px,8dvh,72px)}
-.homeTools{display:flex;align-items:center;justify-content:space-between;gap:5px;padding:5px 5px 3px}
-#record{margin:0;color:#f1d6ff;font-size:clamp(11px,3vw,14px);font-weight:750}
+.homeTools{display:flex;align-items:center;justify-content:space-between;gap:5px;padding:3px 5px;color:#f1d6ff;font-size:clamp(11px,3vw,14px)}
+.homeRecords{flex:1;min-width:0;text-align:left;line-height:1.25}
+.recordSummary{display:flex;align-items:center;gap:5px}
+#record{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:750}
+#difficultyRecords{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1.2fr);gap:3px;font-size:.9em}
+#difficultyRecords span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#perfectRecords{color:#ffe1a0;white-space:nowrap}
 #album{padding:4px 8px;font-size:clamp(11px,3vw,14px);white-space:nowrap}
 #collection{margin:0;padding:7px 15px 7px 30px;text-align:left;color:#e7cff7;font-size:.81rem}
 #collection li{margin:.35em 0}
@@ -188,7 +193,10 @@ main:has(#sb-game:not([hidden])){width:min(100vw,57dvh)}
 <button class="tile" data-game="frog" aria-pressed="false"><img class="tileArt" src="assets/home/frog-card.png" alt="" draggable="false">개구리 점프<small data-pending>준비 중</small></button>
 </div>
 <div class="homeTools">
-<p id="record"></p>
+<div class="homeRecords">
+<div class="recordSummary"><span id="record"></span><span id="perfectRecords" role="img" aria-label="완벽 구출 기록 없음">◇◇◇◇◇</span></div>
+<div id="difficultyRecords" aria-label="난이도별 최고점"><span>쉬움 <b>0</b></span><span>보통 <b>0</b></span><span>어려움 <b>0</b></span></div>
+</div>
 <button id="album" aria-expanded="false" aria-controls="collection">구조 도감</button>
 </div>
 <ul id="collection" hidden></ul>

@@ -2,7 +2,17 @@
 const get=id=>document.getElementById(id);
 const miniGames={};
 window.moonlightArcade=Object.freeze({
-  register(id,game){miniGames[id]=game;}
+  register(id,game){miniGames[id]=game;},
+  showRabbitRecords(bests,perfectRescues){
+    get('difficultyRecords').querySelectorAll('b').forEach((value,i)=>{
+      value.textContent=bests[i];
+      value.title=value.textContent;
+    });
+    const marks=get('perfectRecords');
+    marks.textContent=Array.from({length:5},(_,id)=>perfectRescues.has(id)?'✦':'◇').join('');
+    const areas=Array.from(perfectRescues).sort().map(id=>(id+1)+'구역');
+    marks.setAttribute('aria-label',areas.length?'완벽 구출 '+areas.join(', '):'완벽 구출 기록 없음');
+  }
 });
 const gameCards=[...document.querySelectorAll('[data-game]')];
 const difficultyButtons=[...get('difficulty').querySelectorAll('[data-mode]')];
