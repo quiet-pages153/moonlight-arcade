@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="ko">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>달빛 오락실</title>
+<meta name="theme-color" content="#15102b">
+<link rel="icon" type="image/png" sizes="32x32" href="assets/icons/icon-32.png">
+<link rel="apple-touch-icon" sizes="180x180" href="assets/icons/icon-180.png">
+<link rel="manifest" href="manifest.webmanifest">
+<style>
+*{box-sizing:border-box} [hidden]{display:none!important}
+body{margin:0;min-height:100dvh;display:grid;place-items:center;background:#100c22;color:#fbebff;font-family:system-ui,sans-serif}
+main{position:relative;width:min(100vw,45dvh);height:100dvh;overflow:hidden;background:#16102e;border-inline:1px solid #59457a}
+button{font:inherit;color:inherit;border:1px solid #9c77ca;border-radius:10px;background:#342451;padding:.6em .95em;cursor:pointer}button:focus-visible{outline:3px solid #ffe293}button:disabled{cursor:default}
+#game{height:100%;display:flex;flex-direction:column}
+header{display:flex;align-items:center;justify-content:space-between;gap:4px;padding:8px 6px;font-weight:750;font-size:clamp(11px,3vw,14px);background:#251938}
+header button{padding:5px 7px}#hearts{color:#ff9fc6}#score{color:#ffe195;font-variant-numeric:tabular-nums}
+#field{position:relative;flex:1;min-height:0}
+#board{width:100%;height:100%;display:block;touch-action:none;image-rendering:pixelated}
+footer{padding:7px 4px calc(7px + env(safe-area-inset-bottom));text-align:center;color:#e5c6ff;background:#211638;font-size:clamp(10px,3vw,13px)}
+#overlay{position:absolute;inset:0;display:grid;place-items:center;background:#100a20b8;padding:18px}
+.panel{width:100%;max-width:290px;background:#2d1c47;border:2px solid #c79cf6;padding:22px 12px;text-align:center;border-radius:14px}
+.panel h2{margin:0;color:#ffe29a}.panel p{min-height:1.5em;color:#e7cff7;margin:10px 0 16px}
+#action{background:#d1a8fa;color:#241639;font-weight:850}
+#mission{min-height:1.3em;color:#ffe6a6} #finish{margin-left:5px}
+#crew{display:grid;gap:7px;margin:10px 0 14px}
+#crew .crewChoice{display:grid;grid-template-columns:28px 1fr auto;align-items:center;gap:9px;height:39px;padding:0 10px;text-align:left;border-radius:4px;background:#33254d;border-color:#746092}
+#crew .crewChoice img{width:24px;height:30px;object-fit:contain;image-rendering:pixelated}
+#crew .crewChoice b{font-size:.88rem}
+#crew .crewChoice small{font-size:.72rem;color:var(--shot)}
+#crew .crewChoice[aria-pressed=true]{background:#483264;border-color:#ffdc89}
+#crew .crewChoice[data-crew="2"][aria-pressed=true]{background:#263d64;border-color:#8ed6ff}
+#overlay{padding:12px;overflow:auto}
+.panel:has(#crew:not([hidden])){max-width:320px;padding:14px 13px}
+.panel:has(#crew:not([hidden])) h2{font-size:1.35rem}
+.panel:has(#crew:not([hidden])) p{font-size:.84rem;margin:5px 0}
+.panel:has(#crew:not([hidden])) #action{width:100%;background:#ffdf96}
+#finish{display:block;margin:8px auto 0;padding:1px 5px;border:0;background:none;text-decoration:underline;color:#dfc7f4;font-size:.8rem}
+#bossHud{flex:none;text-align:center;padding:5px 22px 7px;background:#1b1533;color:#ffe3a3;font-size:.83rem}
+#bossMeter{height:8px;margin-top:4px;background:#3a2a55;border:1px solid #9775bd;overflow:hidden}
+#bossMeter span{display:block;height:100%;background:#cc9cf2;width:100%}
+main:has(#home:not([hidden])){border-inline:0}
+#home{height:100%;overflow:auto;overscroll-behavior:contain;text-align:center;padding:0 11px max(12px,env(safe-area-inset-bottom));scrollbar-width:thin;background:linear-gradient(#1b1330,#120d21)}
+.homeFrame{display:flex;flex-direction:column;position:relative;padding:0 8px}
+.homeHero{position:relative;padding-top:clamp(68px,13.1dvh,114px)}
+.upperSky{position:absolute;pointer-events:none;top:0;left:50%;transform:translateX(-50%);width:min(calc(100% + 38px),390px);height:auto}
+.homeHero .signArt{position:relative;z-index:1}
+.visuallyHidden{position:absolute;width:1px;height:1px;margin:-1px;clip-path:inset(50%);overflow:hidden;white-space:nowrap}
+.signArt,.entranceArt{display:block;width:100%;height:auto;flex:none;object-fit:contain}
+.tiles{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;padding:4px 7px 10px;grid-auto-rows:clamp(100px,16.25dvh,144px);
+background:transparent}
+.tile{position:relative;isolation:isolate;min-width:0;min-height:104px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;
+padding:8px 3px;border:0;border-radius:0;color:#d6b7e9;line-height:1.15;font-weight:850;font-size:clamp(12px,4vw,20px);background:#8263ae;
+--edge:10px;clip-path:polygon(var(--edge) 0,calc(100% - var(--edge)) 0,100% var(--edge),100% calc(100% - var(--edge)),calc(100% - var(--edge)) 100%,var(--edge) 100%,0 calc(100% - var(--edge)),0 var(--edge))}
+.tile::before{content:"";position:absolute;z-index:-1;inset:2px;background:#2b224d;clip-path:inherit}
+.tile:not([aria-pressed="true"]) .tileArt{opacity:.80}
+.tile small{display:block;padding:2px 7px;color:#c5a3dd;border:1px solid #7f61a5;border-radius:5px;font-size:.66em;font-weight:700}
+ .tile[aria-pressed="true"]{color:#261a43;background:#ffe1a0;text-shadow:0 1px #f4d5ff}
+ .tile[aria-pressed="true"]::before{inset:3px;background:radial-gradient(ellipse at 50% 23%,#e3b4fa,#c093e9 58%,#9b6fc9);box-shadow:inset 0 0 0 2px #f5bdef}
+ .tile[aria-pressed="true"]:focus-visible::before, .tile[aria-pressed="true"]:hover::before{filter:brightness(1.12)}
+ .tile[aria-pressed="true"]:active::before{filter:brightness(.95)}
+.tileArt{display:block;width:68%;height:clamp(32px,6.5dvh,60px);object-fit:contain;image-rendering:auto}
+ .tile[aria-pressed="true"] .tileArt{height:clamp(44px,8dvh,72px)}
+.homeTools{display:flex;align-items:center;justify-content:space-between;gap:5px;padding:5px 5px 3px}
+#record{margin:0;color:#f1d6ff;font-size:clamp(11px,3vw,14px);font-weight:750}
+#album{padding:4px 8px;font-size:clamp(11px,3vw,14px);white-space:nowrap}
+#collection{margin:0;padding:7px 15px 7px 30px;text-align:left;color:#e7cff7;font-size:.81rem}
+#collection li{margin:.35em 0}
+#difficulty{position:absolute;inset:0;z-index:5;display:grid;place-items:center;padding:22px;background:#100a22c9}
+.difficultyPanel{width:min(100%,270px);padding:19px 18px;background:#25193e;border:2px solid #a687ca;box-shadow:inset 0 0 0 3px #392650}
+.difficultyPanel h2{text-align:center;margin:0 0 13px;color:#ffe4aa;font-size:1.2rem}
+.difficultyOptions{display:grid;gap:9px}
+.difficultyOptions .tile{min-height:48px;height:48px;width:100%;font-size:1rem}
+.difficultyOptions .tile:first-child{background:#ffe1a0;color:#281a40}
+.difficultyOptions .tile:first-child::before{background:#d3a9f4}
+.difficultyOptions .tile:focus-visible::before,.difficultyOptions .tile:hover::before{background:#ae85da}
+#difficultyBack{display:block;margin:12px auto 0;padding:4px 12px}
+.twinkles{position:absolute;z-index:2;pointer-events:none;top:0;left:50%;transform:translateX(-50%);width:min(calc(100% + 38px),390px);aspect-ratio:390/152}
+.twinkles i{position:absolute;left:var(--x);top:var(--y);width:8px;height:8px;translate:-50% -50%;background:#fff1b6;
+clip-path:polygon(50% 0,61% 38%,100% 50%,61% 62%,50% 100%,39% 62%,0 50%,39% 38%);
+opacity:0;animation:star-glint 1.85s ease-in-out var(--delay) infinite}
+@keyframes star-glint{0%,17%,58%,100%{opacity:0;scale:.65}34%{opacity:1;scale:1.65}}
+@media(prefers-reduced-motion:reduce){.twinkles i{animation:none;opacity:.30}}
+@media(max-height:680px){.tile{min-height:88px}.tileArt{height:clamp(30px,7dvh,55px)} .tile[aria-pressed="true"] .tileArt{height:clamp(39px,8dvh,65px)}.homeTools{padding-block:3px}}
+header,footer{background:#261a3e;box-shadow:inset 0 0 0 1px #735491}
+#field{border-inline:2px solid #735491}
+.panel{border-radius:8px;box-shadow:inset 0 0 0 3px #51376f,0 6px 0 #140f22}
+#soundPanel{width:min(86vw,310px);padding:18px;color:#f3ddff;background:#281c42;border:2px solid #aa8ad2;border-radius:9px}
+#soundPanel::backdrop{background:#120d24c9}
+#soundPanel h2{margin:0 0 14px;color:#ffe39f;font-size:1.2rem}
+.soundRow{display:grid;grid-template-columns:1fr auto;gap:5px;margin:12px 0}
+.soundRow input{grid-column:1/-1;width:100%;accent-color:#e1adf7}
+.soundButtons{display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px;margin-top:16px}
+.challengeSummary{color:#ffe6ad;font-size:.8rem;margin-bottom:9px}
+
+main:has(#sb-game:not([hidden])){width:min(100vw,57dvh)}
+#sb-game{height:100%;display:flex;flex-direction:column;gap:6px;padding:max(6px,env(safe-area-inset-top)) 8px calc(12px + env(safe-area-inset-bottom));background:#15102b;position:relative}
+#sb-game button{min-height:44px;padding:4px;font-weight:800;touch-action:none}
+/* HUD and board positions map directly to the original 887 × 1633 art. */
+.sb-stage{position:relative;flex:1;min-height:0;display:grid;place-items:center;container-type:size}
+.sb-scene{position:relative;width:min(100cqw,calc(100cqh * 887 / 1633));aspect-ratio:887 / 1633;container-type:inline-size}
+.sb-backdrop{position:absolute;width:100%;height:100%;display:block;pointer-events:none}
+.sb-top{position:absolute;inset:0;pointer-events:none}
+#sb-game .sb-top button{pointer-events:auto;position:absolute;top:7.7%;translate:-50% -50%;width:44px;height:44px;opacity:0}
+#sb-game .sb-top button:focus-visible{opacity:1}
+#sb-back{left:9.7%}#sb-pause{left:90.4%}
+/* Align live information to the taller inset below the awning. */
+/* Separate the upcoming pieces from the score and charge display. */
+.sb-hud{position:absolute;top:14.9%;left:8%;width:84.8%;height:6.5%;display:grid;grid-template-columns:57.5fr 40.2fr;gap:clamp(4px,1.1cqw,9px);text-align:center;line-height:1;color:#f2dcff}
+.sb-info,.sb-preview{min-width:0}
+.sb-info{display:grid;grid-template-columns:1.52fr .85fr;align-items:stretch;padding:1px 4px}
+.sb-stat,.sb-preview{min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px}
+.sb-hud .sb-stat+.sb-stat{border-left:1px solid #b88cdb65}
+.sb-footer{flex:none;display:grid;gap:2px}
+#sb-test-tools{display:flex;align-items:center;justify-content:center;gap:7px;font-size:13px;color:#fff1cd;background:#372450;border:1px solid #906aba;border-radius:8px;padding:4px}
+#sb-test-level{font:inherit;color:inherit;background:#281c43;padding:5px;border-radius:6px}
+#sb-game #sb-test-start{min-height:32px;padding-inline:9px;font-size:12px}
+ .sb-records{display:flex;justify-content:space-evenly;align-items:center;gap:3px;width:min(100%,480px);justify-self:center;color:#dbc6f4;font-size:var(--record-font,clamp(10px,3vw,14px));font-variant-numeric:tabular-nums}
+.sb-records span{white-space:nowrap;line-height:1.35}
+.sb-records b{color:#fff0c8;font-size:1.23em}
+#sb-game #sb-audio-enable{justify-self:center;min-height:32px;padding-inline:14px;font-size:13px;border-color:#bb91e7}
+#sb-reset-wins,#sb-open-test{width:100%;margin-top:5px}
+.sb-charge{position:relative;flex:none;display:grid;place-items:center}
+#sb-game #sb-gauge{display:flex;align-items:center;gap:10px;padding:0 18px;border:1px solid #514174;border-radius:24px;background:#211939;color:#dbc7f8;font-size:12px}
+#sb-game #sb-gauge:disabled{opacity:1;cursor:default}
+#sb-gauge:has(.ready){border-color:#b995dd}
+#sb-stars{letter-spacing:2px}
+#sb-powers{position:absolute;z-index:3;bottom:calc(100% + 8px);left:50%;transform:translateX(-50%);display:flex;gap:6px;padding:6px;background:#211637;border:1px solid #9873c6;border-radius:12px;white-space:nowrap}
+#sb-game #sb-powers button{padding:0 10px;font-size:13px}
+.sb-preview{border-color:#c394f3}
+.sb-label{font-size:clamp(9px,3.4cqw,15px);font-weight:800}
+.sb-hud b{color:#ffe39d;font-variant-numeric:tabular-nums;font-size:clamp(10px,3.9cqw,18px)}
+#sb-score,#sb-level{font-size:clamp(16px,6cqw,27px);letter-spacing:.02em}
+ .sb-info:has(#sb-score[data-wide="true"]) #sb-level,#sb-score[data-wide="true"]{font-size:clamp(12px,4.2cqw,21px)}
+.sb-stage-label{font-size:clamp(8px,2.85cqw,13px);color:#f5dcff}
+#sb-stars{color:#d2afef;white-space:nowrap;font-size:clamp(11px,4.3cqw,19px)}
+#sb-stars.ready{color:#ffe18b;text-shadow:0 0 8px #e4a62b}
+#sb-next{display:flex;align-items:center;justify-content:center;gap:clamp(4px,1.6cqw,8px)}
+.sb-mini{--preview-cell:clamp(6px,2.3cqw,12px);display:grid;grid-auto-columns:var(--preview-cell);grid-auto-rows:var(--preview-cell);gap:1px}
+.sb-mini:first-child{--preview-cell:clamp(8px,3.2cqw,16px)}
+.sb-mini i{border-radius:2px;box-shadow:inset 0 1px #ffffff9c,inset 0 -1px #21162e7a}
+.sb-field{position:absolute;left:12.0631%;top:24.1886%;width:76.0992%;height:74.4029%}
+#sb-board{width:100%;height:100%;display:block;touch-action:none}
+#sb-game.sb-ended .sb-charge{visibility:hidden}
+#sb-panel #sb-mute{margin-top:6px;width:100%}
+#sb-confirm:not(:disabled){background:#ffe094;color:#271939}
+#sb-game button:disabled{opacity:.64}
+#sb-notice{position:absolute;left:50%;top:12%;transform:translateX(-50%);z-index:1;max-width:90%;width:max-content;pointer-events:none;background:#392451;color:#ffe4a9;border:1px solid #be96ea;padding:5px 8px;border-radius:5px;font-size:.75rem}
+#sb-aim{position:absolute;z-index:2;left:8px;right:8px;bottom:calc(12px + env(safe-area-inset-bottom));padding:4px 6px;background:#2a1b44;border:1px solid #a987d1;border-radius:6px}
+#sb-lesson-slot{position:absolute;left:8px;right:8px;bottom:calc(12px + env(safe-area-inset-bottom) + 82px);z-index:2;background:#231738e8;border:1px solid #a77ac3;border-radius:6px;padding:3px 6px}
+#sb-lesson-slot:has(#sb-lesson[hidden]){display:none}
+#sb-game #sb-skip{min-height:36px}
+#sb-lesson,#sb-aim{display:flex;align-items:center;justify-content:space-between;gap:5px;font-size:clamp(11px,3vw,13px);color:#fff0c4}
+#sb-lesson button,#sb-aim button{flex:none}
+#sb-panel{position:absolute;inset:0;z-index:4;display:grid;place-items:center;background:#100a20c9;padding:12px}
+#sb-panel .panel{width:100%}
+#sb-panel-message{white-space:pre-line}
+#sb-primary,#sb-secondary,#sb-music{width:100%;margin-top:5px}
+#sb-intro{position:absolute;inset:0;z-index:5;display:grid;place-items:start center;padding:clamp(100px,25dvh,210px) 14px 8px;background:#100b2455}
+#sb-intro .panel{max-width:265px;padding:10px;background:#2a1a42ed}
+#sb-intro p{font-size:.83rem;margin:8px 0}
+#sb-intro button{min-height:44px;margin:2px}
+#sb-game.sb-ended #sb-panel{position:absolute;inset:0;display:grid;align-items:start;justify-items:center;padding:clamp(120px,23dvh,205px) 8px 8px;background:#0d09252e}
+#sb-game.sb-ended #sb-panel .panel{max-width:260px;background:#2a1a42d9;padding:9px 8px;display:grid;grid-template-columns:1.3fr 1fr;gap:4px 6px;box-shadow:none}
+#sb-game.sb-ended #sb-panel-title{grid-column:1/-1;font-size:clamp(13px,4vw,16px)}
+#sb-game.sb-ended #sb-panel-message{grid-column:1/-1;margin:0;min-height:0;font-size:clamp(10px,3.1vw,13px);line-height:1.25}
+#sb-game.sb-ended #sb-panel button{margin:0;min-height:44px;font-size:clamp(11px,3.5vw,15px)}
+#sb-game.sb-ended #sb-primary{background:#ffe094;color:#241639}
+#sb-game.sb-ended #sb-mute,#sb-game.sb-ended #sb-music{display:none}
+</style>
+<main>
+<section id="home">
+<div class="homeFrame">
+<h1 class="visuallyHidden">달빛 오락실</h1>
+<div class="homeHero">
+<img class="upperSky" src="assets/home/upper-sky.png" alt="" draggable="false">
+<div class="twinkles" aria-hidden="true">
+<i style="--x:8%;--y:45%;--delay:-.12s"></i><i style="--x:20%;--y:31%;--delay:-.56s"></i>
+<i style="--x:45%;--y:30%;--delay:-.91s"></i><i style="--x:57.4%;--y:62.5%;--delay:-1.25s"></i>
+<i style="--x:70%;--y:26.3%;--delay:-1.58s"></i>
+</div>
+<img class="signArt" src="assets/home/moon-sign.png" alt="" draggable="false">
+</div>
+<div class="tiles" role="group" aria-label="미니게임 선택">
+<button class="tile" data-game="rabbit" aria-pressed="false"><img class="tileArt" src="assets/home/rabbit-card.png" alt="" draggable="false">달토끼 슈팅</button>
+<button class="tile" data-game="blocks" aria-pressed="false"><img class="tileArt" src="assets/home/blocks-card.png" alt="" draggable="false">별빛 블록</button>
+<button class="tile" data-game="library" aria-pressed="false"><img class="tileArt" src="assets/home/library-card.png" alt="" draggable="false">별빛 도서관<small data-pending>준비 중</small></button>
+<button class="tile" data-game="frog" aria-pressed="false"><img class="tileArt" src="assets/home/frog-card.png" alt="" draggable="false">개구리 점프<small data-pending>준비 중</small></button>
+</div>
+<div class="homeTools">
+<p id="record"></p>
+<button id="album" aria-expanded="false" aria-controls="collection">구조 도감</button>
+</div>
+<ul id="collection" hidden></ul>
+<img class="entranceArt" src="assets/home/arcade-front.png" alt="" draggable="false">
+</div>
+</section>
+<div id="difficulty" hidden role="dialog" aria-modal="true" aria-labelledby="difficultyTitle">
+<div class="difficultyPanel">
+<h2 id="difficultyTitle">난이도 선택</h2>
+<div class="difficultyOptions">
+<button class="tile" data-mode="0">쉬움</button>
+<button class="tile" data-mode="1">보통</button>
+<button class="tile" data-mode="2">어려움</button>
+</div>
+<button id="difficultyBack">돌아가기</button>
+</div>
+</div>
+<section id="game" hidden>
+<header><button id="back">홈</button><span id="score"></span><span id="level"></span><span id="hearts"></span><button id="sound" type="button" aria-haspopup="dialog" aria-label="게임 소리 설정">소리 켬</button><button id="pause" aria-label="일시 정지">Ⅱ</button></header>
+<div id="bossHud" hidden><div id="bossName"></div><div id="bossMeter" role="progressbar" aria-label="보스 체력" aria-valuemin="0" aria-valuemax="100"><span id="bossFill"></span></div></div>
+<div id="field"><canvas id="board" tabindex="0" width="360" height="710" aria-label="달토끼 슈팅 플레이 화면"></canvas>
+<div id="overlay" hidden><div class="panel"><h2 id="title"></h2><p id="detail"></p><div id="crew" hidden></div><button id="action"></button><button id="finish" hidden>기록 남기고 종료</button></div></div></div>
+<footer><div id="mission"></div><span id="weapon"></span> · 방향키 · WASD · 드래그</footer>
+</section>
+
+<section id="sb-game" hidden aria-labelledby="sb-title">
+<div id="sb-test-tools" hidden>
+<label for="sb-test-level">단계 테스트</label><select id="sb-test-level"></select>
+<button id="sb-test-start">선택 단계 시작</button>
+</div>
+<div class="sb-stage"><div class="sb-scene">
+<img class="sb-backdrop" src="assets/blocks/arcade-scene.png" alt="">
+<div class="sb-top"><button id="sb-back" aria-label="오락실로">❮</button><h1 class="visuallyHidden" id="sb-title">별빛 블록</h1><button id="sb-pause" aria-label="일시정지 및 설정">Ⅱ</button></div>
+<div class="sb-hud">
+<div class="sb-info">
+<span class="sb-stat"><span class="sb-label">점수</span><b id="sb-score">0</b></span>
+<span class="sb-stat"><span class="sb-label">단계</span><b id="sb-level">1</b></span>
+<span id="sb-combo" class="visuallyHidden">0</span>
+</div>
+<span class="sb-preview"><span class="sb-label">다음</span><span id="sb-next"></span></span>
+</div>
+<div class="sb-field"><canvas id="sb-board" width="320" height="576" tabindex="0" aria-label="별빛 블록 플레이판"></canvas><div id="sb-notice" role="status" hidden></div></div>
+</div></div>
+<div id="sb-lesson-slot"><div id="sb-lesson" hidden><span id="sb-lesson-text"></span><button id="sb-skip">건너뛰기</button></div></div>
+<div id="sb-aim" hidden><span id="sb-aim-text" aria-live="polite"></span><button id="sb-confirm">확인</button><button id="sb-cancel">취소</button></div>
+<div class="sb-footer">
+<button id="sb-audio-enable" hidden>소리 켜기</button>
+<div class="sb-records">
+<span>시간 <b id="sb-clock">00:00.0</b></span>
+<span>최단 완주 <b id="sb-best-time">—</b></span>
+<span>완주 <b id="sb-wins">0회</b></span>
+<span>최고점 <b id="sb-best-score">0</b></span>
+</div>
+<div class="sb-charge">
+<button id="sb-gauge" aria-controls="sb-powers" aria-expanded="false"><span>별빛</span><b id="sb-stars" aria-hidden="true">☆☆☆☆☆</b></button>
+<div id="sb-powers" role="group" aria-label="별빛 사용" hidden>
+<button id="sb-meteor">세로 · ★3</button><button id="sb-cross">십자 · ★5</button>
+</div>
+</div></div>
+<div id="sb-intro" hidden role="dialog" aria-modal="true" aria-labelledby="sb-intro-title"><div class="panel"><h2 id="sb-intro-title">별빛 블록</h2><p>좌우로 밀어 이동, 탭해서 회전. 아래로 짧게 밀면 두 칸, 길게 쓸면 즉시 낙하해요.</p><button id="sb-practice">연습하기</button><button id="sb-intro-skip">바로 시작</button></div></div>
+<div id="sb-panel" hidden role="dialog" aria-modal="true" aria-labelledby="sb-panel-title"><div class="panel"><h2 id="sb-panel-title"></h2><p id="sb-panel-message"></p><button id="sb-primary"></button><button id="sb-secondary"></button><button id="sb-mute" aria-label="효과음" aria-pressed="true">♪ 켬</button><button id="sb-music" aria-pressed="true">배경음악 켬</button><button id="sb-reset-wins" hidden>누적 완주 초기화</button><button id="sb-open-test" hidden>단계 테스트</button></div></div>
+</section>
+<dialog id="soundPanel" aria-labelledby="soundTitle">
+<h2 id="soundTitle">소리 설정</h2>
+<label class="soundRow" for="musicVolume">배경음악 <output id="musicValue"></output>
+<input id="musicVolume" type="range" min="0" max="100" step="1"></label>
+<label class="soundRow" for="effectsVolume">효과음 <output id="effectsValue"></output>
+<input id="effectsVolume" type="range" min="0" max="100" step="1"></label>
+<div class="soundButtons"><button id="soundMute" type="button">음소거</button><button id="vibrationToggle" aria-pressed="true" type="button">진동 켬</button><button id="soundDone" type="button">닫기</button></div>
+</dialog>
+</main>
+<script src="js/arcade-home.js"></script>
+<script src="js/firework-bank.js"></script>
+<script src="js/moon-rabbit.js"></script>
+<script src="js/starlight-blocks.js?v=mobile-audio"></script>
+</html>
