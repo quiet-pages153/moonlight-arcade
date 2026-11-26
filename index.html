@@ -105,14 +105,14 @@ main:has(#sb-game:not([hidden])){width:min(100vw,57dvh)}
 .sb-stage{position:relative;flex:1;min-height:0;display:grid;place-items:center;container-type:size}
 .sb-scene{position:relative;width:min(100cqw,calc(100cqh * 887 / 1633));aspect-ratio:887 / 1633;container-type:inline-size}
 .sb-backdrop{position:absolute;width:100%;height:100%;display:block;pointer-events:none}
-.sb-top{position:absolute;inset:0;pointer-events:none}
+.sb-top{position:absolute;inset:0;pointer-events:none;z-index:2}
 #sb-game .sb-top button{pointer-events:auto;position:absolute;top:7.7%;translate:-50% -50%;width:44px;height:44px;opacity:0}
 #sb-game .sb-top button:focus-visible{opacity:1}
 #sb-back{left:9.7%}#sb-pause{left:90.4%}
 /* Align live information to the taller inset below the awning. */
 /* Separate the upcoming pieces from the score and charge display. */
-.sb-hud{position:absolute;top:14.9%;left:8%;width:84.8%;height:6.5%;display:grid;grid-template-columns:57.5fr 40.2fr;gap:clamp(4px,1.1cqw,9px);text-align:center;line-height:1;color:#f2dcff}
-.sb-info,.sb-preview{min-width:0}
+.sb-hud{position:absolute;bottom:calc(75.8114% + 46px);left:8%;width:84.8%;height:6.5%;display:grid;grid-template-columns:57.5fr 40.2fr;gap:clamp(4px,1.1cqw,9px);text-align:center;line-height:1;color:#f2dcff;pointer-events:none}
+.sb-info,.sb-preview{min-width:0;background:#32204f;border-radius:6px}
 .sb-info{display:grid;grid-template-columns:1.52fr .85fr;align-items:stretch;padding:1px 4px}
 .sb-stat,.sb-preview{min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px}
 .sb-hud .sb-stat+.sb-stat{border-left:1px solid #b88cdb65}
@@ -125,28 +125,41 @@ main:has(#sb-game:not([hidden])){width:min(100vw,57dvh)}
 .sb-records b{color:#fff0c8;font-size:1.23em}
 #sb-game #sb-audio-enable{justify-self:center;min-height:32px;padding-inline:14px;font-size:13px;border-color:#bb91e7}
 #sb-reset-wins,#sb-open-test{width:100%;margin-top:5px}
-.sb-charge{position:relative;flex:none;display:grid;place-items:center}
-#sb-game #sb-gauge{display:flex;align-items:center;gap:10px;padding:0 18px;border:1px solid #514174;border-radius:24px;background:#211939;color:#dbc7f8;font-size:12px}
-#sb-game #sb-gauge:disabled{opacity:1;cursor:default}
-#sb-gauge:has(.ready){border-color:#b995dd}
-#sb-stars{letter-spacing:2px}
-#sb-powers{position:absolute;z-index:3;bottom:calc(100% + 8px);left:50%;transform:translateX(-50%);display:flex;gap:6px;padding:6px;background:#211637;border:1px solid #9873c6;border-radius:12px;white-space:nowrap}
-#sb-game #sb-powers button{padding:0 10px;font-size:13px}
+#sb-gauge{position:absolute;bottom:75.8114%;left:6%;width:88%;height:44px;display:flex;align-items:center;justify-content:space-between;gap:4px;padding:0 4px;background:#27183f;border-radius:8px;z-index:1}
+#sb-stars,#sb-powers{display:flex;gap:2px;align-items:center;white-space:nowrap}
+#sb-stars span{display:grid;place-items:center;width:6.6cqw;height:6.6cqw;border-radius:4px;background:#3a2756;color:#6c5390;font-size:clamp(14px,5.6cqw,26px);line-height:1}
+#sb-stars .ready{background:#694626;color:#ffe18b}
+#sb-stars .sb-spark{animation:sb-slot .28s ease-out}
+#sb-game #sb-powers button{padding:0 clamp(3px,1.25cqw,8px);font-size:clamp(10px,3.65cqw,15px);border:0;background:#4a3268;color:#e1c9ff}
+#sb-game #sb-powers button:not(:disabled){background:#ffe198;color:#392145;animation:sb-power 2.3s ease-in-out infinite}
+#sb-game #sb-powers button:disabled{opacity:.68}
+.sb-flight{position:absolute;top:0;left:0;z-index:2;pointer-events:none;color:#ffeb99;font:bold 22px/20px system-ui;text-shadow:0 0 7px #ffc144}
 .sb-preview{border-color:#c394f3}
 .sb-label{font-size:clamp(9px,3.4cqw,15px);font-weight:800}
 .sb-hud b{color:#ffe39d;font-variant-numeric:tabular-nums;font-size:clamp(10px,3.9cqw,18px)}
 #sb-score,#sb-level{font-size:clamp(16px,6cqw,27px);letter-spacing:.02em}
  .sb-info:has(#sb-score[data-wide="true"]) #sb-level,#sb-score[data-wide="true"]{font-size:clamp(12px,4.2cqw,21px)}
 .sb-stage-label{font-size:clamp(8px,2.85cqw,13px);color:#f5dcff}
-#sb-stars{color:#d2afef;white-space:nowrap;font-size:clamp(11px,4.3cqw,19px)}
-#sb-stars.ready{color:#ffe18b;text-shadow:0 0 8px #e4a62b}
 #sb-next{display:flex;align-items:center;justify-content:center;gap:clamp(4px,1.6cqw,8px)}
 .sb-mini{--preview-cell:clamp(6px,2.3cqw,12px);display:grid;grid-auto-columns:var(--preview-cell);grid-auto-rows:var(--preview-cell);gap:1px}
 .sb-mini:first-child{--preview-cell:clamp(8px,3.2cqw,16px)}
 .sb-mini i{border-radius:2px;box-shadow:inset 0 1px #ffffff9c,inset 0 -1px #21162e7a}
 .sb-field{position:absolute;left:12.0631%;top:24.1886%;width:76.0992%;height:74.4029%}
 #sb-board{width:100%;height:100%;display:block;touch-action:none}
-#sb-game.sb-ended .sb-charge{visibility:hidden}
+#sb-board.sb-full{box-shadow:0 0 12px 3px #ffd671b5}
+#sb-board.sb-shake{animation:sb-shake .12s linear}
+#sb-field::after{content:"";position:absolute;inset:0;pointer-events:none}
+#sb-field.sb-danger::after{background:linear-gradient(#ef609f 0 5px,#9a397b84 6px,transparent 24px);animation:sb-danger 2.4s ease-in-out infinite}
+#sb-attack{position:absolute;z-index:1;bottom:5px;left:50%;translate:-50% 0;padding:2px 6px;border-radius:4px;background:#382455;color:#fff0cf;font-size:clamp(10px,3.5cqw,13px);font-weight:800;white-space:nowrap;pointer-events:none}
+#sb-attack.sb-imminent{background:#8d285e;color:#fff4ae;box-shadow:0 0 0 2px #ffadbc}
+@keyframes sb-slot{from{background:#fff3cd;color:#58320c;box-shadow:0 0 9px #ffe6a2}}
+@keyframes sb-power{50%{box-shadow:0 0 9px #ffe092; background:#fff2c5}}
+@keyframes sb-danger{50%{opacity:.5}}
+@keyframes sb-shake{25%{transform:translateX(3px)}65%{transform:translateX(-3px)}}
+@media(prefers-reduced-motion:reduce){
+  #sb-game #sb-powers button:not(:disabled),#sb-field.sb-danger::after,#sb-board.sb-shake{animation:none}
+  .sb-flight{display:none}
+}
 #sb-panel #sb-mute{margin-top:6px;width:100%}
 #sb-confirm:not(:disabled){background:#ffe094;color:#271939}
 #sb-game button:disabled{opacity:.64}
@@ -238,7 +251,11 @@ main:has(#sb-game:not([hidden])){width:min(100vw,57dvh)}
 </div>
 <span class="sb-preview"><span class="sb-label">다음</span><span id="sb-next"></span></span>
 </div>
-<div class="sb-field"><canvas id="sb-board" width="320" height="576" tabindex="0" aria-label="별빛 블록 플레이판"></canvas><div id="sb-notice" role="status" hidden></div></div>
+<div id="sb-gauge">
+<b id="sb-stars" role="img" aria-label="별빛 0/5"><span aria-hidden="true">★</span><span aria-hidden="true">★</span><span aria-hidden="true">★</span><span aria-hidden="true">★</span><span aria-hidden="true">★</span></b>
+<div id="sb-powers" role="group" aria-label="별빛 사용"><button id="sb-meteor" disabled>세로 ★3</button><button id="sb-cross" disabled>십자 ★5</button></div>
+</div>
+<div id="sb-field" class="sb-field"><canvas id="sb-board" width="320" height="576" tabindex="0" aria-label="별빛 블록 플레이판"></canvas><div id="sb-notice" role="status" hidden></div><div id="sb-attack" hidden></div></div>
 </div></div>
 <div id="sb-lesson-slot"><div id="sb-lesson" hidden><span id="sb-lesson-text"></span><button id="sb-skip">건너뛰기</button></div></div>
 <div id="sb-aim" hidden><span id="sb-aim-text" aria-live="polite"></span><button id="sb-confirm">확인</button><button id="sb-cancel">취소</button></div>
@@ -250,12 +267,7 @@ main:has(#sb-game:not([hidden])){width:min(100vw,57dvh)}
 <span>완주 <b id="sb-wins">0회</b></span>
 <span>최고점 <b id="sb-best-score">0</b></span>
 </div>
-<div class="sb-charge">
-<button id="sb-gauge" aria-controls="sb-powers" aria-expanded="false"><span>별빛</span><b id="sb-stars" aria-hidden="true">☆☆☆☆☆</b></button>
-<div id="sb-powers" role="group" aria-label="별빛 사용" hidden>
-<button id="sb-meteor">세로 · ★3</button><button id="sb-cross">십자 · ★5</button>
 </div>
-</div></div>
 <div id="sb-intro" hidden role="dialog" aria-modal="true" aria-labelledby="sb-intro-title"><div class="panel"><h2 id="sb-intro-title">별빛 블록</h2><p>좌우로 밀어 이동, 탭해서 회전. 아래로 짧게 밀면 두 칸, 길게 쓸면 즉시 낙하해요.</p><button id="sb-practice">연습하기</button><button id="sb-intro-skip">바로 시작</button></div></div>
 <div id="sb-panel" hidden role="dialog" aria-modal="true" aria-labelledby="sb-panel-title"><div class="panel"><h2 id="sb-panel-title"></h2><p id="sb-panel-message"></p><button id="sb-primary"></button><button id="sb-secondary"></button><button id="sb-mute" aria-label="효과음" aria-pressed="true">♪ 켬</button><button id="sb-music" aria-pressed="true">배경음악 켬</button><button id="sb-reset-wins" hidden>누적 완주 초기화</button><button id="sb-open-test" hidden>단계 테스트</button></div></div>
 </section>

@@ -2,7 +2,13 @@
 'use strict';
 const get = id => document.getElementById('sb-' + id);
 const shell = get('game'), canvas = get('board'), ctx = canvas.getContext('2d');
+const field = get('field'), gauge = get('stars'), starSlots = [...gauge.children];
 const width = 10, height = 18, unit = 32;
+const activeModes = ['play','lesson'];
+const rowScores = [0,100,260,460,740];
+const ghostDash = [4,4], solidLine = [];
+const clearStrengths = [0,.45,.72,.86,1];
+const blockSymbols = {O:'✦',T:'◇',J:'☾',S:'✿'};
 const pieces = {
   I: [[0,1],[1,1],[2,1],[3,1]], O: [[1,0],[2,0],[1,1],[2,1]],
   T: [[1,0],[0,1],[1,1],[2,1]], J: [[0,0],[0,1],[1,1],[2,1]],
@@ -79,7 +85,7 @@ let music, musicBeat = -1;
 let audioNeedsTap = false;
 function showAudioPrompt() {
   get('audio-enable').hidden = !audioNeedsTap || (record.muted && record.musicMuted) ||
-    !['play','lesson'].includes(state?.mode);
+    !activeModes.includes(state?.mode);
 }
 const musicBeatLength = 60/116/2;
 function musicPressure() {
@@ -106,7 +112,8 @@ function musicPressure() {
 function syncMusic() {
   if (typeof Audio !== 'function') return;
   try {
-    if (record.musicMuted || shell.hidden || state?.mode !== 'play') {
+    const playing = state?.mode === 'play' || (state?.mode === 'power' && state.beforeAim === 'play');
+    if (record.musicMuted || shell.hidden || !playing) {
       music?.pause();
       return;
     }
@@ -223,14 +230,8 @@ function update() {
   score.setAttribute('data-wide',score.textContent.length > 5 ? 'true' : 'false');
   get('level').textContent = state.level;
   get('combo').textContent = state.combo;
-  const canAim = ['play','lesson'].includes(state.mode);
-  get('stars').textContent = '★'.repeat(state.charge) + '☆'.repeat(5-state.charge);
-  get('gauge').setAttribute('aria-label','별빛 '+state.charge+'/5');
-  get('gauge').disabled = !canAim || state.charge < 3;
-  if (get('gauge').disabled) closePowers();
-  get('meteor').disabled = !canAim || state.charge < 3;
-  get('cross').disabled = !canAim || state.charge < 5;
-  get('stars').classList.toggle('ready',state.charge >= 3);
+  updatePowers();
+  updateDanger();
   get('mute').textContent = record.muted ? '효과음 끔 · 눌러 켜기' : '효과음 켬 · 눌러 끄기';
   get('mute').setAttribute('aria-pressed',String(!record.muted));
   get('music').textContent = record.musicMuted ? '배경음악 끔' : '배경음악 켬';
@@ -253,6 +254,16 @@ function update() {
     }
     return grid;
   }));
+}
+function canAim() {
+  return !state.dropFlight && (state.mode === 'lesson' || (state.mode === 'play' && !!state.active));
+}
+function updatePowers() {
+  gauge.setAttribute('aria-label','별빛 '+state.charge+'/5');
+  starSlots.forEach((slot,i) => slot.classList.toggle('ready',i < state.charge));
+  get('meteor').disabled = !canAim() || state.charge < 3;
+  get('cross').disabled = !canAim() || state.charge < 5;
+  canvas.classList.toggle('sb-full',state.charge === 5);
 }
 function remember() {
   record.score = Math.max(record.score,state.score);
@@ -290,7 +301,9 @@ function start(lesson = !record.learned, level = 1) {
   cancelAnimationFrame(frameId);
   clearTimeout(toastTimer);
   pointer = null;
-  closePowers();
+  clearChargeFlights();
+  canvas.classList.remove('sb-shake');
+  starSlots.forEach(slot => slot.classList.remove('sb-spark'));
   document.getElementById('home').hidden = true;
   shell.hidden = false;
   shell.classList.toggle('sb-ended',false);
@@ -298,7 +311,7 @@ function start(lesson = !record.learned, level = 1) {
   get('lesson').hidden = !lesson;
   state = {board:Array.from({length:height},empty), queue:[], active:null, mode:lesson?'lesson':'play',
     score:0, lines:(level-1)*6, combo:0, bestCombo:0, level, charge:0, target:null, flash:null, lessonPlaced:false,
-    runTime:0, clockTenth:0, placements:0, attacks:[]};
+    runTime:0, clockTenth:0, placements:0, attacks:[], chargeFlights:[]};
   if (lesson) {
     state.queue.push('O','L','T');
     for (const x of [0,1,2,3,4,7,8,9]) state.board[height-1][x] = x < 4 ? 'T':'S';
@@ -319,6 +332,7 @@ function leave() {
   if (state.mode !== 'lesson') remember();
   cancelAnimationFrame(frameId);
   clearTimeout(toastTimer);
+  clearChargeFlights();
   pointer = null;
   shell.hidden = true;
   syncMusic();
@@ -365,6 +379,33 @@ function attackWarning() {
   const attack = state.attacks[0];
   return attack ? Math.max(1,attack.at-state.placements)+'블록 뒤 +'+attack.rows.length+'줄' : '';
 }
+function updateDanger() {
+  field.classList.toggle('sb-danger',state.board.slice(0,5).some(row => row.some(Boolean)));
+  const attack = state.attacks[0];
+  const warning = get('attack');
+  warning.textContent = attackWarning();
+  warning.hidden = !attack;
+  const imminent = !!attack && attack.at-state.placements <= 1;
+  warning.classList.toggle('sb-imminent',imminent);
+  if (imminent && state.warnedAttack !== attack) {
+    state.warnedAttack = attack;
+    sound([147]);
+  }
+}
+function fullRows(board) {
+  return board.flatMap((row,y) => row.every(Boolean) ? [y] : []);
+}
+function collapseRows(board, rows) {
+  return [...rows.map(empty),...board.filter((_,y) => !rows.includes(y))];
+}
+function scoreRows(count, chain = false) {
+  state.combo += count;
+  state.bestCombo = Math.max(state.bestCombo,state.combo);
+  state.lines += count;
+  state.score += (rowScores[count] || 100*count)*state.level
+    + (35*(state.combo-1) + (chain ? 150*count : 0))*state.level;
+  state.level = Math.min(fallTimes.length,1+Math.floor(state.lines/6));
+}
 function riseDue() {
   let risen = 0;
   while (risen < 3 && state.attacks[0]?.at <= state.placements) {
@@ -397,8 +438,7 @@ function locked(hard = false, distance = 0) {
   pointer = null;
   state.elapsed = 0;
   for (const [x,y] of active.cells) board[active.y+y][active.x+x] = active.type;
-  const full = [];
-  board.forEach((row,y) => { if (row.every(Boolean)) full.push(y); });
+  const full = fullRows(board);
   if (hard || !state.contacted) {
     showLanding(active,distance);
     landingSound(hard,full.length > 0);
@@ -410,12 +450,10 @@ function locked(hard = false, distance = 0) {
       toast('점선을 빈 두 칸에 맞춰보세요');
       return;
     }
-    state.board = board.filter((_,y) => !full.includes(y));
-    state.board.unshift(empty());
+    state.board = collapseRows(board,full);
     state.active = null;
     state.lessonPlaced = true;
-    beginClear(board,full,active,1,true);
-    state.charge = 3;
+    beginClear(board,full,active,1,3);
     get('lesson-text').textContent = '연속으로 줄을 지우면 콤보! 별빛으로 세로줄도 지워 보세요.';
     get('skip').textContent = '게임 시작';
     update();
@@ -426,23 +464,10 @@ function locked(hard = false, distance = 0) {
   if (!full.length) state.combo = 0;
   else {
     const previousCombo = state.combo;
-    state.combo += full.length;
-    state.bestCombo = Math.max(state.bestCombo,state.combo);
-    state.lines += full.length;
-    state.score += ([0,100,260,460,740][full.length] || 100 * full.length) * state.level
-      + 35 * (state.combo - 1) * state.level;
+    scoreRows(full.length);
     const earned = full.length >= 2 || Math.floor(state.combo/3) > Math.floor(previousCombo/3);
-    const charged = earned && state.charge < 5;
-    if (charged) {
-      const previousCharge = state.charge;
-      state.charge = Math.min(5,state.charge + (full.length === 4 ? 2 : 1));
-      if (state.charge === 5) toast('십자 삭제 준비!');
-      else if (previousCharge < 3 && state.charge >= 3) toast('세로 삭제 준비! 5개를 모으면 십자 삭제');
-    }
-    state.level = Math.min(fallTimes.length,1+Math.floor(state.lines/6));
-    state.board = board.filter((_,y) => !full.includes(y));
-    for (const _ of full) state.board.unshift(empty());
-    beginClear(board,full,active,state.combo,charged);
+    state.board = collapseRows(board,full);
+    beginClear(board,full,active,state.combo,earned ? (full.length === 4 ? 2 : 1) : 0);
     remember();
   }
   if (state.lines >= finishLines) {
@@ -467,7 +492,7 @@ function locked(hard = false, distance = 0) {
 }
 let lastSoftDrop = -Infinity;
 function action(name, manual = true) {
-  if (shell.hidden || !['play','lesson'].includes(state.mode) || !state.active || state.dropFlight) return;
+  if (shell.hidden || !activeModes.includes(state.mode) || !state.active || state.dropFlight) return;
   let next = {...state.active};
   if (name === 'drop') {
     while (valid({...next,y:next.y+1})) next.y++;
@@ -475,6 +500,7 @@ function action(name, manual = true) {
     if (distance > 0 && !reducedMotion.matches) {
       state.dropFlight = {target:next,distance,start:performance.now(),duration:Math.min(185,105+distance*6)};
       state.motion = null;
+      updatePowers();
       if (!record.muted && audio?.state === 'running') {
         const time = audio.currentTime;
         const duration = state.dropFlight.duration/1000;
@@ -524,10 +550,12 @@ function drawBlock(x,y,type,ghost = false) {
   const px = x * unit, py = y * unit;
   const color = colors[type] || '#766478';
   if (ghost) {
+    ctx.fillStyle = '#d2b7f34a';
+    ctx.fillRect(px+4,py+4,unit-8,unit-8);
     ctx.strokeStyle = '#c9b8e0'; ctx.lineWidth = 2;
-    ctx.setLineDash([4,4]);
+    ctx.setLineDash(ghostDash);
     ctx.strokeRect(px+4,py+4,unit-8,unit-8);
-    ctx.setLineDash([]);
+    ctx.setLineDash(solidLine);
     return;
   }
   const tile = tileArt[type];
@@ -540,14 +568,18 @@ function drawBlock(x,y,type,ghost = false) {
   ctx.fillStyle = '#ffffff85'; ctx.fillRect(px+3,py+3,unit-7,2);
   ctx.fillStyle = '#ffffff42'; ctx.fillRect(px+3,py+5,2,unit-11);
   ctx.fillStyle = '#30184b55'; ctx.fillRect(px+5,py+unit-7,unit-8,4);
-  if (['O','T','J','S'].includes(type)) {
+  if (blockSymbols[type]) {
     ctx.fillStyle = '#2e164e78';
     ctx.font = 'bold 15px system-ui';
     ctx.textAlign = 'center';
-    ctx.fillText({O:'✦',T:'◇',J:'☾',S:'✿'}[type],px+16,py+21);
+    ctx.fillText(blockSymbols[type],px+16,py+21);
   }
 }
+const maxParticles = 84;
+let particlesLeft = maxParticles;
 function starBurst(x,y,size,rotation) {
+  if (particlesLeft <= 0) return;
+  particlesLeft--;
   ctx.beginPath();
   for (let i=0;i<10;i++) {
     const angle = rotation + i*Math.PI/5;
@@ -563,6 +595,67 @@ function starBurst(x,y,size,rotation) {
 const clearWindup = 18;
 const clearIntervalMs = 94;
 const clearSettle = 86;
+const powerHitStop = 80;
+const powerSettle = 240;
+
+function clearChargeFlights() {
+  state?.chargeFlights.forEach(flight => flight.star?.remove());
+}
+function queueCharge(flash, amount) {
+  const flights = state.chargeFlights;
+  const previousCharge = state.charge;
+  const count = Math.min(amount,5-previousCharge);
+  state.charge += count;
+  for (let i=0;i<count;i++) {
+    const row = flash.rows[Math.min(i,flash.rows.length-1)];
+    const start = Math.max(flash.start+flash.lastHit+i*85,(flights.at(-1)?.start ?? -Infinity)+85);
+    flights.push({row,center:flash.center,start,slotIndex:previousCharge+i});
+  }
+  const cross = previousCharge < 5 && state.charge === 5;
+  if (cross || (previousCharge < 3 && state.charge >= 3)) {
+    state.readyEffect = {cross,start:flash.start};
+    toast(cross ? '십자 삭제 준비!' : '세로 삭제 준비!');
+    sound(cross ? [523,659,784,1047] : [659,880,1047]);
+  }
+}
+function advanceCharge(now) {
+  const flights = state.chargeFlights;
+  flights.forEach(flight => {
+    const t = (now-flight.start)/400;
+    if (t < 0 || t >= 1 || reducedMotion.matches) return;
+    const slot = starSlots[flight.slotIndex];
+    if (!flight.star) {
+      flight.star = document.createElement('span');
+      flight.star.className = 'sb-flight';
+      flight.star.setAttribute('aria-hidden','true');
+      flight.star.textContent = '★';
+      gauge.closest('.sb-scene').append(flight.star);
+    }
+    if (flight.slot !== slot) {
+      const scene = flight.star.parentElement.getBoundingClientRect();
+      const board = field.getBoundingClientRect();
+      const target = slot.getBoundingClientRect();
+      flight.fromX = board.left-scene.left+flight.center/width*board.width-10;
+      flight.fromY = board.top-scene.top+(flight.row+.5)/height*board.height-10;
+      flight.toX = target.left-scene.left+target.width/2-10;
+      flight.toY = target.top-scene.top+target.height/2-10;
+      flight.slot = slot;
+    }
+    const eased = t*(2-t);
+    const x = flight.fromX+(flight.toX-flight.fromX)*eased+Math.sin(t*Math.PI)*18;
+    const y = flight.fromY+(flight.toY-flight.fromY)*eased;
+    flight.star.style.transform = 'translate('+x+'px,'+y+'px)';
+  });
+  while (flights[0] && now >= flights[0].start+400) {
+    const flight = flights.shift();
+    flight.star?.remove();
+    const slot = starSlots[flight.slotIndex];
+    slot.classList.remove('sb-spark');
+    void slot.offsetWidth;
+    slot.classList.add('sb-spark');
+    sound([1047+(flight.slotIndex+1)*95]);
+  }
+}
 
 function clearTone(time, high, low, volume, duration, type = 'sine') {
   const wave = audio.createOscillator(), gain = audio.createGain();
@@ -577,12 +670,13 @@ function clearTone(time, high, low, volume, duration, type = 'sine') {
   wave.stop(time+duration);
 }
 
-function beginClear(board, rows, active, combo, charged) {
+function beginClear(board, rows, active, combo, charge = 0) {
   const ordered = [...rows].reverse();
-  const center = active.x + active.cells.reduce((sum,[x]) => sum+x+.5,0)/active.cells.length;
+  const center = active ? active.x + active.cells.reduce((sum,[x]) => sum+x+.5,0)/active.cells.length : width/2;
   const start = performance.now();
   const lastHit = clearWindup+(ordered.length-1)*clearIntervalMs;
   state.flash = {board,rows:ordered,start,lastHit,center,combo,quad:ordered.length >= 4};
+  queueCharge(state.flash,charge);
   if (state.flash.quad) state.quadEffect = state.flash;
   if (record.muted) return;
   if (audio?.state !== 'running') {
@@ -599,10 +693,9 @@ function beginClear(board, rows, active, combo, charged) {
     clearTone(hit+.032,850+index*90,760+index*78,.055,.198);
   });
   const last = audio.currentTime+lastHit/1000;
-  if (combo > 1 || charged) {
+  if (combo > 1) {
     const note = 523.25 * 2 ** (Math.min(combo-1,7)*2/12);
     clearTone(last+.035,note,note,.067,.115);
-    if (charged) clearTone(last+.083,note*1.5,note*1.5,.061,.122);
   }
   clearTone(last+.098,290,122,.07,.042,'triangle');
   if (state.flash.quad) {
@@ -612,12 +705,12 @@ function beginClear(board, rows, active, combo, charged) {
 }
 
 function drawMeteorTarget({x,y},cross) {
-  ctx.strokeStyle = '#ead5ff';
-  ctx.lineWidth = 2;
-  ctx.setLineDash([5,5]);
-  ctx.strokeRect(x*unit+2,2,unit-4,canvas.height-4);
-  if (cross) ctx.strokeRect(2,y*unit+2,canvas.width-4,unit-4);
-  ctx.setLineDash([]);
+  ctx.fillStyle = '#e7aaff60';
+  ctx.fillRect(x*unit,0,unit,canvas.height);
+  if (cross) ctx.fillRect(0,y*unit,canvas.width,unit);
+  ctx.fillStyle = '#fff1b8';
+  ctx.fillRect(x*unit+3,0,5,canvas.height);
+  if (cross) ctx.fillRect(0,y*unit+3,canvas.width,5);
 }
 
 const quadTail = 610;
@@ -673,7 +766,7 @@ function drawClearParticles(flash, age) {
   const still = reducedMotion.matches;
   if (flash.target) {
     const {x,y} = flash.target;
-    if (!still && age < 125) {
+    if (!still && age < 105) {
       const px = (x+.5)*unit, py = (y+.5)*unit*Math.min(1,age/100)**2;
       ctx.save();
       ctx.fillStyle = '#dcc0ff';
@@ -691,17 +784,15 @@ function drawClearParticles(flash, age) {
       ctx.restore();
     }
     flash.tiles.forEach(tile => {
-      const t = (age-96-(Math.abs(tile.y-y)+Math.abs(tile.x-x))*7)/155;
-      if (t < 0) {
-        drawBlock(tile.x,tile.y,tile.type);
-        return;
-      }
+      const t = (age-(still ? 0 : (Math.abs(tile.y-y)+Math.abs(tile.x-x))*3))/155;
       if (t >= 1) return;
+      if (t < 0) return;
       ctx.globalAlpha = 1-t;
       ctx.fillStyle = colors[tile.type] || '#ddd1fa';
       const px = (tile.x+.5)*unit, py = (tile.y+.5)*unit;
-      starBurst(px,py-(still ? 0 : t*36),17-t*10,t*4);
-      if (!still) {
+      if (still) ctx.fillRect(px-12,py-12,24,24);
+      else {
+        starBurst(px,py-t*36,17-t*10,t*4);
         ctx.fillStyle = '#fff1ff';
         starBurst(px-t*18,py-t*16,4*(1-t*.7),t*5);
         starBurst(px+t*21,py+t*7,5*(1-t*.7),-t*4);
@@ -711,7 +802,12 @@ function drawClearParticles(flash, age) {
     flash.rows.forEach((row,index) => {
       const t = (age-clearWindup-index*clearIntervalMs)/245;
       if (t < 0 || t >= 1) return;
-      const travel = still ? 0 : 1-(1-t)**2;
+      const strength = clearStrengths[Math.min(4,flash.rows.length)];
+      ctx.globalAlpha = Math.max(0,1-t*4)*strength;
+      ctx.fillStyle = flash.quad ? '#fff0ba' : '#fff2ff';
+      ctx.fillRect(0,row*unit,canvas.width,unit);
+      if (still) return;
+      const travel = 1-(1-t)**2;
       flash.board[row].forEach((type,x) => {
         const px = (x+.5)*unit, py = (row+.5)*unit;
         const spread = (x+.5-flash.center)*travel*(flash.quad ? 18 : 14);
@@ -720,26 +816,24 @@ function drawClearParticles(flash, age) {
         starBurst(px+spread,py-travel*(52+(x%4)*22),(flash.quad ? 24 : 21)*(1-t*.7),t*5+x);
         ctx.fillStyle = '#fff4fd';
         starBurst(px+spread*.6,py-travel*(24+(x%3)*16),9*(1-t*.75),x-t*3);
-        if (!still) {
-          ctx.globalAlpha *= .78;
-          ctx.fillStyle = colors[type] || '#ddd1fa';
-          starBurst(px-spread*.25,py+travel*(18+(x%3)*9),5*(1-t*.75),x+t*4);
-        }
+        ctx.globalAlpha *= .78;
+        ctx.fillStyle = colors[type] || '#ddd1fa';
+        starBurst(px-spread*.25,py+travel*(18+(x%3)*9),5*(1-t*.75),x+t*4);
       });
     });
     const hits = Math.min(flash.rows.length,1+Math.floor((age-clearWindup)/clearIntervalMs));
     const combo = flash.combo-flash.rows.length+hits;
-    if (hits > 0 && combo > 1 && (!flash.quad || age < flash.lastHit)) {
+    if (hits > 0 && combo > 1) {
       ctx.globalAlpha = Math.max(0,Math.min(1,(flash.lastHit+215-age)/115));
-      ctx.font = '900 27px system-ui';
-      ctx.textAlign = 'center';
+      ctx.font = '900 32px system-ui';
+      ctx.textAlign = 'right';
       ctx.strokeStyle = '#231437';
       ctx.lineWidth = 5;
       ctx.fillStyle = '#f5dbff';
       const y = Math.max(35, Math.min(...flash.rows)*unit-10);
       const title = combo+' 콤보';
-      ctx.strokeText(title,canvas.width/2,y);
-      ctx.fillText(title,canvas.width/2,y);
+      ctx.strokeText(title,canvas.width-9,y);
+      ctx.fillText(title,canvas.width-9,y);
     }
   }
   ctx.globalAlpha = 1;
@@ -778,6 +872,7 @@ function drawFallingPiece(flight, now) {
 }
 
 function draw(now) {
+  particlesLeft = maxParticles;
   ctx.fillStyle = '#15102c';
   ctx.fillRect(0,0,canvas.width,canvas.height);
   ctx.fillStyle = '#34274e';
@@ -786,6 +881,14 @@ function draw(now) {
   const flash = state.flash;
   const age = flash ? now-flash.start : Infinity;
   const settling = flash?.rows && age < flash.lastHit+clearSettle;
+  if (flash?.quad && age >= flash.lastHit && !flash.shaken) {
+    flash.shaken = true;
+    if (!reducedMotion.matches) {
+      canvas.classList.remove('sb-shake');
+      void canvas.offsetWidth;
+      canvas.classList.add('sb-shake');
+    }
+  }
   if (settling) {
     const settle = reducedMotion.matches ? 1 : Math.max(0,Math.min(1,(age-flash.lastHit)/clearSettle));
     flash.board.forEach((row,y) => {
@@ -799,6 +902,13 @@ function draw(now) {
       ctx.fillStyle = '#fff3ff';
       row.forEach((_,x) => ctx.fillRect(x*unit+4,y*unit+4,unit-8,unit-8));
       ctx.globalAlpha = 1;
+    });
+  } else if (flash?.gravity && !reducedMotion.matches && age < powerSettle) {
+    const {board,row} = flash.gravity;
+    const t = Math.min(1,Math.max(0,(age-35)/150));
+    board.forEach((cells,y) => {
+      if (y === row) return;
+      cells.forEach((type,x) => { if (type) drawBlock(x,y+(y < row ? t : 0),type); });
     });
   } else {
     state.board.forEach((row,y) => row.forEach((type,x) => { if (type) drawBlock(x,y,type); }));
@@ -833,10 +943,10 @@ function draw(now) {
     ctx.restore();
   }
   if (state.dropFlight) drawFallingPiece(state.dropFlight,now);
-  else if (state.active) {
+  else if (state.active && valid(state.active)) {
     const {type,cells,x,y} = state.active;
     let landing = y;
-    while (valid({...state.active,y:landing+1})) landing++;
+    if (!state.power) while (valid({...state.active,y:landing+1})) landing++;
     if (landing !== y) cells.forEach(([cx,cy]) => drawBlock(x+cx,landing+cy,type,true));
     const motion = state.motion;
     if (motion && !reducedMotion.matches) {
@@ -883,20 +993,18 @@ function draw(now) {
         ctx.globalAlpha = (distance ? .93 : .78)*Math.max(0,1-elapsed/(distance ? 140 : 118));
         ctx.fillRect(x*unit+3,y*unit+3,unit-6,unit-6);
       });
-      cells.filter(([,y]) => y===floor).forEach(([x,y],i) => {
+      if (!still) cells.filter(([,y]) => y===floor).forEach(([x,y],i) => {
         const px = (x+.5)*unit, py = (y+1)*unit-4;
-        if (!still) {
-          ctx.globalAlpha = .85*(1-t);
-          ctx.strokeStyle = colors[type];
-          ctx.lineWidth = 3.8*(1-t)+.7;
-          ctx.beginPath();
-          ctx.ellipse(px,py,12+travel*(distance ? 43 : 30),3+travel*9,0,Math.PI,Math.PI*2);
-          ctx.stroke();
-        }
-        for (let j=0;j<(still ? 2 : 7);j++) {
+        ctx.globalAlpha = .85*(1-t);
+        ctx.strokeStyle = colors[type];
+        ctx.lineWidth = 3.8*(1-t)+.7;
+        ctx.beginPath();
+        ctx.ellipse(px,py,12+travel*(distance ? 43 : 30),3+travel*9,0,Math.PI,Math.PI*2);
+        ctx.stroke();
+        for (let j=0;j<7;j++) {
           ctx.globalAlpha = 1-t;
           ctx.fillStyle = j%2 ? colors[type] : '#fff4dd';
-          starBurst(px+(j-(still ? .5 : 3))*travel*15,py-travel*(17+(j%3)*15), (j%2 ? 9 : 6)*(1-t*.65),i+j+t*3);
+          starBurst(px+(j-3)*travel*15,py-travel*(17+(j%3)*15), (j%2 ? 9 : 6)*(1-t*.65),i+j+t*3);
         }
       });
       ctx.globalAlpha = 1;
@@ -914,15 +1022,49 @@ function draw(now) {
     if (quadAge < state.quadEffect.lastHit+quadTail) drawQuadFinale(state.quadEffect,quadAge);
     else state.quadEffect = null;
   }
+  if (state.readyEffect) {
+    const {cross,start} = state.readyEffect;
+    const t = (now-start)/(cross ? 620 : 300);
+    if (t >= 1) state.readyEffect = null;
+    else {
+      ctx.globalAlpha = (1-t)*.85;
+      ctx.strokeStyle = cross ? '#d798ff' : '#ffe18b';
+      ctx.lineWidth = 8;
+      ctx.strokeRect(4,4,canvas.width-8,canvas.height-8);
+      if (cross) {
+        ctx.fillStyle = '#ba6cff';
+        ctx.globalAlpha = (1-t)*.24;
+        ctx.fillRect(0,0,canvas.width,canvas.height);
+        if (!reducedMotion.matches) {
+          const y = t*canvas.height;
+          const wave = ctx.createLinearGradient(0,y-85,0,y+25);
+          wave.addColorStop(0,'#ba6cff00');
+          wave.addColorStop(.7,'#edd3ff');
+          wave.addColorStop(1,'#ba6cff00');
+          ctx.globalAlpha = .65*(1-t);
+          ctx.fillStyle = wave;
+          ctx.fillRect(0,y-85,canvas.width,110);
+        }
+      }
+      ctx.globalAlpha = 1;
+    }
+  }
 }
 
 function tick(now) {
+  if (state.mode === 'paused' && state.power) {
+    frameId = requestAnimationFrame(tick);
+    return;
+  }
   const elapsed = now-lastTime;
   const delta = Math.min(50,elapsed);
   lastTime = now;
+  advanceCharge(now);
+  const powering = state.mode === 'power';
+  if (powering && now >= state.power.until) advancePower(now);
   if (state.mode === 'finishing' && now >= state.nextPieceAt) finish(true);
   const flying = state.dropFlight;
-  if (state.mode === 'play') {
+  if (!powering && state.mode === 'play') {
     state.runTime += Math.max(0,elapsed);
     const tenth = Math.floor(state.runTime/100);
     if (tenth !== state.clockTenth) {
@@ -947,7 +1089,7 @@ function tick(now) {
       }
     }
   }
-  if (flying && ['play','lesson'].includes(state.mode) && now >= flying.start+flying.duration) {
+  if (flying && activeModes.includes(state.mode) && now >= flying.start+flying.duration) {
     state.dropFlight = null;
     state.active = flying.target;
     locked(true,flying.distance);
@@ -956,7 +1098,7 @@ function tick(now) {
   frameId = requestAnimationFrame(tick);
 }
 function aim(cost = 3) {
-  if (!['play','lesson'].includes(state.mode) || state.charge < cost || state.dropFlight) return;
+  if (!canAim() || state.charge < cost) return;
   state.cost = cost;
   pointer = null;
   state.beforeAim = state.mode;
@@ -968,6 +1110,7 @@ function aim(cost = 3) {
   update();
 }
 function closeAim() {
+  if (state.mode !== 'aim') return;
   state.mode = state.beforeAim; state.target = null;
   lastTime = performance.now();
   get('aim').hidden = true;
@@ -978,7 +1121,11 @@ function pause(exit = false) {
   if (state.mode === 'ended' || state.mode === 'intro') { if (exit) leave(); return; }
   if (state.mode === 'aim') closeAim();
   if (state.mode === 'lesson') { if(exit) leave(); return; }
-  if (state.mode !== 'play') return;
+  if (state.mode !== 'play' && state.mode !== 'power') return;
+  if (state.power) {
+    state.power.pausedAt = performance.now();
+    state.power.remaining = Math.max(0,state.power.until-state.power.pausedAt);
+  }
   state.mode = 'paused';
   pointer = null;
   panel(exit?'오락실로 돌아갈까요?':'잠깐 쉬어요', '점수 ' + state.score + ' · 콤보 ' + state.combo, '계속하기', '기록 남기고 나가기');
@@ -1004,34 +1151,78 @@ get('skip').onclick = completeLesson;
 get('music').onclick = () => { record.musicMuted = !record.musicMuted; save(); update(); };
 get('practice').onclick = () => start(true);
 get('intro-skip').onclick = completeLesson;
-function closePowers() {
-  get('powers').hidden = true;
-  get('gauge').setAttribute('aria-expanded','false');
-}
-get('gauge').onclick = () => {
-  if (!get('powers').hidden) closePowers();
-  else {
-    get('powers').hidden = false;
-    get('gauge').setAttribute('aria-expanded','true');
-  }
-};
 get('meteor').onclick = () => aim(3);
 get('cross').onclick = () => aim(5);
 get('cancel').onclick = closeAim;
 get('confirm').onclick = () => {
   if (state.mode !== 'aim' || !state.target) return;
-  const {x,y} = state.target;
-  const cross = state.cost === 5;
-  const tiles = state.board.flatMap((row,cy) => row.flatMap((type,cx) =>
-    type && (cx === x || (cross && cy === y)) ? [{x:cx,y:cy,type}] : []));
-  for (const row of state.board) row[x] = null;
-  if (cross) state.board[y].fill(null);
+  state.power = {target:state.target,cross:state.cost === 5,phase:'hit',chain:0,until:performance.now()+powerHitStop,
+    keepLock:state.resets >= 8 && !!state.active && grounded()};
+  state.mode = 'power';
   state.charge -= state.cost;
-  state.flash = {tiles,start:performance.now(),target:{x,y}};
-  sound([880,659,523]);
-  closeAim();
-  if (state.mode === 'lesson') get('lesson-text').textContent = '세로줄을 지웠어요! 별빛 다섯 개로는 십자 삭제가 가능해요.';
+  state.motion = state.impact = null;
+  get('aim').hidden = true;
+  canvas.focus({preventScroll:true});
+  update();
 };
+function advancePower(now) {
+  const power = state.power;
+  if (power.phase === 'hit') {
+    const {x,y} = power.target;
+    const tiles = state.board.flatMap((row,cy) => row.flatMap((type,cx) =>
+      type && (cx === x || (power.cross && cy === y)) ? [{x:cx,y:cy,type}] : []));
+    const board = state.board.map(row => row.map((type,cx) => cx === x ? null : type));
+    state.board = power.cross ? collapseRows(board,[y]) : board;
+    power.keepLock &&= valid(state.active) && grounded();
+    state.flash = {tiles,start:now,target:power.target,gravity:power.cross ? {board,row:y} : null};
+    state.target = null;
+    power.phase = 'settle';
+    power.until = now+powerSettle;
+    sound(power.cross ? [156,523,784,1047] : [196,659,880]);
+    updateDanger();
+    return;
+  }
+  const board = state.board;
+  const rows = fullRows(board);
+  if (rows.length) {
+    const previousLevel = state.level;
+    power.chain += rows.length;
+    scoreRows(rows.length,true);
+    state.board = collapseRows(board,rows);
+    power.keepLock &&= valid(state.active) && grounded();
+    beginClear(board,rows,null,state.combo);
+    power.until = state.flash.start+state.flash.lastHit+clearSettle;
+    if (state.level > previousLevel && state.lines < finishLines) planAttacks(state.level);
+    toast('별빛 연쇄 ×'+power.chain);
+    remember();
+    update();
+    return;
+  }
+  state.power = null;
+  if (state.lines >= finishLines) {
+    state.active = null;
+    finish(true);
+    return;
+  }
+  const piece = state.active;
+  if (piece && !valid(piece)) {
+    const top = -Math.min(...piece.cells.map(([,y]) => y));
+    while (piece.y > top && !valid(piece)) piece.y--;
+    if (!valid(piece)) {
+      state.active = null;
+      finish();
+      return;
+    }
+  }
+  state.mode = state.beforeAim;
+  state.elapsed = 0;
+  if (!power.keepLock) {
+    state.lockTime = 0;
+    state.contacted = false;
+  }
+  if (state.mode === 'lesson') get('lesson-text').textContent = '세로줄을 지웠어요! 별빛 다섯 개로는 십자 삭제가 가능해요.';
+  update();
+}
 get('primary').onclick = () => {
   if (state.mode === 'ended') {
     if (testMode) get('test-start').click();
@@ -1039,8 +1230,17 @@ get('primary').onclick = () => {
   }
   else {
     get('panel').hidden = true;
-    state.mode = 'play';
     lastTime = performance.now();
+    const power = state.power;
+    state.mode = power ? 'power' : 'play';
+    if (power) {
+      const pausedFor = lastTime-power.pausedAt;
+      power.until = lastTime+power.remaining;
+      for (const effect of new Set([state.flash,state.quadEffect,state.readyEffect,...state.chargeFlights])) {
+        if (effect) effect.start += pausedFor;
+      }
+      if (state.riseAt) state.riseAt += pausedFor;
+    }
     update();
     canvas.focus({preventScroll:true});
   }
@@ -1071,8 +1271,7 @@ canvas.onpointerdown = event => {
     selectTarget(x,y);
     return;
   }
-  if (!['play','lesson'].includes(state.mode) || !state.active || state.dropFlight) return;
-  closePowers();
+  if (!activeModes.includes(state.mode) || !state.active || state.dropFlight) return;
   canvas.setPointerCapture?.(event.pointerId);
   pointer = {id:event.pointerId,piece:state.active,x:event.clientX,y:event.clientY,axis:null,
     step:Math.max(11,rect.width/width*.72)};
@@ -1124,7 +1323,7 @@ document.addEventListener('keydown', event => {
     return;
   }
   if (event.target.closest?.('button') && [' ','Enter'].includes(event.key)) return;
-  if (!['play','lesson'].includes(state.mode)) return;
+  if (!activeModes.includes(state.mode)) return;
   const key = event.key.toLowerCase();
   const name = {arrowleft:'left',a:'left',arrowright:'right',d:'right',arrowdown:'down',s:'down',
     arrowup:'rotate',x:'rotate',z:'reverse',w:'rotate',' ':'drop'}[key];
