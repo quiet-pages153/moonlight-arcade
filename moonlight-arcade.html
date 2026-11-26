@@ -2439,6 +2439,21 @@ function fullRows(board) {
 function collapseRows(board, rows) {
   return [...rows.map(empty),...board.filter((_,y) => !rows.includes(y))];
 }
+function compressColumns(board, rows) {
+  const compacted = Array.from({length:height},empty);
+  const tiles = [];
+  for (let x=0;x<width;x++) {
+    let toY = height-1;
+    for (let y=height-1;y>=0;y--) {
+      const type = board[y][x];
+      if (!type || rows.includes(y)) continue;
+      compacted[toY][x] = type;
+      tiles.push({x,y,toY,type});
+      toY--;
+    }
+  }
+  return {board:compacted,tiles};
+}
 function scoreRows(count, chain = false) {
   state.combo += count;
   state.bestCombo = Math.max(state.bestCombo,state.combo);
@@ -2638,6 +2653,7 @@ const clearIntervalMs = 94;
 const clearSettle = 86;
 const powerHitStop = 80;
 const powerSettle = 240;
+const maxPowerChainRounds = 20;
 
 function clearChargeFlights() {
   state?.chargeFlights.forEach(flight => flight.star?.remove());
@@ -2930,7 +2946,12 @@ function draw(now) {
       canvas.classList.add('sb-shake');
     }
   }
-  if (settling) {
+  const gravity = flash?.gravity;
+  const fallAge = age-(flash?.lastHit ?? 0);
+  if (gravity && fallAge >= 0 && fallAge < powerSettle && !reducedMotion.matches) {
+    const t = (fallAge/powerSettle)**2;
+    gravity.forEach(({x,y,toY,type}) => drawBlock(x,y+(toY-y)*t,type));
+  } else if (settling && (!gravity || fallAge < 0)) {
     const settle = reducedMotion.matches ? 1 : Math.max(0,Math.min(1,(age-flash.lastHit)/clearSettle));
     flash.board.forEach((row,y) => {
       const hit = flash.rows.indexOf(y);
@@ -2943,13 +2964,6 @@ function draw(now) {
       ctx.fillStyle = '#fff3ff';
       row.forEach((_,x) => ctx.fillRect(x*unit+4,y*unit+4,unit-8,unit-8));
       ctx.globalAlpha = 1;
-    });
-  } else if (flash?.gravity && !reducedMotion.matches && age < powerSettle) {
-    const {board,row} = flash.gravity;
-    const t = Math.min(1,Math.max(0,(age-35)/150));
-    board.forEach((cells,y) => {
-      if (y === row) return;
-      cells.forEach((type,x) => { if (type) drawBlock(x,y+(y < row ? t : 0),type); });
     });
   } else {
     state.board.forEach((row,y) => row.forEach((type,x) => { if (type) drawBlock(x,y,type); }));
@@ -3197,7 +3211,7 @@ get('cross').onclick = () => aim(5);
 get('cancel').onclick = closeAim;
 get('confirm').onclick = () => {
   if (state.mode !== 'aim' || !state.target) return;
-  state.power = {target:state.target,cross:state.cost === 5,phase:'hit',chain:0,until:performance.now()+powerHitStop,
+  state.power = {target:state.target,cross:state.cost === 5,phase:'hit',chain:0,rounds:0,until:performance.now()+powerHitStop,
     keepLock:state.resets >= 8 && !!state.active && grounded()};
   state.mode = 'power';
   state.charge -= state.cost;
@@ -3213,26 +3227,30 @@ function advancePower(now) {
     const tiles = state.board.flatMap((row,cy) => row.flatMap((type,cx) =>
       type && (cx === x || (power.cross && cy === y)) ? [{x:cx,y:cy,type}] : []));
     const board = state.board.map(row => row.map((type,cx) => cx === x ? null : type));
-    state.board = power.cross ? collapseRows(board,[y]) : board;
+    const gravity = power.cross ? compressColumns(board,[y]) : null;
+    state.board = gravity ? gravity.board : board;
     power.keepLock &&= valid(state.active) && grounded();
-    state.flash = {tiles,start:now,target:power.target,gravity:power.cross ? {board,row:y} : null};
+    state.flash = {tiles,start:now,target:power.target,gravity:gravity?.tiles};
     state.target = null;
     power.phase = 'settle';
-    power.until = now+powerSettle;
+    power.until = now+(power.cross && reducedMotion.matches ? 0 : powerSettle);
     sound(power.cross ? [156,523,784,1047] : [196,659,880]);
     updateDanger();
     return;
   }
   const board = state.board;
-  const rows = fullRows(board);
+  const rows = power.cross && power.rounds < maxPowerChainRounds ? fullRows(board) : [];
   if (rows.length) {
     const previousLevel = state.level;
+    power.rounds++;
     power.chain += rows.length;
     scoreRows(rows.length,true);
-    state.board = collapseRows(board,rows);
+    const gravity = compressColumns(board,rows);
+    state.board = gravity.board;
     power.keepLock &&= valid(state.active) && grounded();
     beginClear(board,rows,null,state.combo);
-    power.until = state.flash.start+state.flash.lastHit+clearSettle;
+    state.flash.gravity = gravity.tiles;
+    power.until = state.flash.start+state.flash.lastHit+(reducedMotion.matches ? 0 : powerSettle);
     if (state.level > previousLevel && state.lines < finishLines) planAttacks(state.level);
     toast('별빛 연쇄 ×'+power.chain);
     remember();
