@@ -21,4 +21,4 @@ source, scripts = re.subn(r'<script src="(js/[^"?]+\.js)(?:\?[^"]*)?"></script>'
 result, count = re.subn(r'"(assets/(?:home|sprites|audio|blocks)/[^"]+\.(?:png|mp3|wav))"', embed, source)
 if scripts < 3 or count < 8:
     raise ValueError(f"Missing game scripts or assets ({scripts} scripts, {count} assets)")
-(root / "moonlight-arcade.html").write_text(result, encoding="utf-8")
+(root / "moonlight-arcade.html").write_text(result, encoding="utf-8", newline="\n")

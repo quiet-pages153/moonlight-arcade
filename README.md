@@ -14,5 +14,5 @@
 
 ## 오프라인판 다시 만들기
 
-원본(index.html, js/, assets/)을 고친 뒤 `node build_offline.js` 또는 `python3 build_offline.py`를 실행합니다. Node판은 단계 테스트판도 함께 만듭니다.
+원본(index.html, js/, assets/)을 고친 뒤 `py -3 build_offline.py`(윈도우) 또는 `node build_offline.js`를 실행합니다. 결과는 같고, Node판은 단계 테스트판도 함께 만듭니다.
 

@@ -41,7 +41,7 @@ ZIP 무결성, JavaScript 문법, 웹 자산 경로, 오프라인 재빌드를 �
 
 GitHub: https://github.com/quiet-pages153/moonlight-arcade · 주소: https://quiet-pages153.github.io/moonlight-arcade/
 
-- 오프라인판 다시 만들기: 파이썬이 없으면 `node build_offline.js` (moonlight-arcade.html과 block-level-test.html을 함께 만든다. 기준판과 바이트 단위로 같게 나오는 것 확인).
+- 오프라인판 다시 만들기: `py -3 build_offline.py`(이 PC의 파이썬 3.12) 또는 `node build_offline.js` (moonlight-arcade.html과 block-level-test.html을 함께 만든다. 기준판과 바이트 단위로 같게 나오는 것 확인).
 - 다른 앱 보호: 같은 `quiet-pages153.github.io` 주소를 다른 앱과 함께 쓰므로 저장 키는 `moonlight-` 접두사만 쓰고, `localStorage.clear()`와 서비스 워커는 쓰지 않는다. 나중에 오프라인 설치를 넣으면 범위를 `/moonlight-arcade/`로, 캐시 이름도 `moonlight-arcade-` 접두사로 하고 다른 캐시는 지우지 않는다.
 - 슈팅: 최종 보스 HP 0 순간 완주 저장 / 구출 실패 후 재도전 시 구출 시작 점수로 복원(최고점은 구출 성공·게임오버 때 반영) / Lv.9→10 문구 수정 / 보통 3구역 보스 핵 개방 2.1초·첫 감옥 위협 5.0초 / 어려움 일반 편대 발사 간격 하한 0.65초 / 난이도별 최고점(`moonlight-arcade.best.<난이도>.v1`)과 완벽 구출 5칸을 홈에 표시 / 드래그 중 판 크기가 바뀌면 기준점 재설정 / 이어 하기·재도전 때 소리 다시 켜기, 실패하면 소리 버튼이 '소리 켜기'로 바뀜.
 - 슈팅의 터치 시작 때 기체를 손가락 위로 올리는 보정은 원래 설계(손가락이 기체를 가리지 않게)라서 유지했다.
