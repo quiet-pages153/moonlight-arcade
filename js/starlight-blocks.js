@@ -2,6 +2,7 @@
 'use strict';
 const get = id => document.getElementById('sb-' + id);
 const shell = get('game'), canvas = get('board'), ctx = canvas.getContext('2d');
+const stage = shell.querySelector('.sb-stage'), scene = stage.querySelector('.sb-scene');
 const field = get('field'), gauge = get('stars'), starSlots = [...gauge.children];
 const width = 10, height = 18, unit = 32;
 const boardWidth = width * unit, boardHeight = height * unit;
@@ -207,35 +208,12 @@ function landingSound(hard, clearing) {
     clearTone(time+.075,1568,1510,.033*strength,.19);
   }
 }
-const recordsRow = get('clock').parentElement?.parentElement;
-let fittedRecordLengths = '';
-function fitRecordRow(force = false) {
-  if (!recordsRow?.clientWidth) return;
-  const entries = [...recordsRow.children];
-  const lengths = entries.map(entry => entry.textContent.length).join(',');
-  if (!force && fittedRecordLengths === lengths) return;
-  fittedRecordLengths = lengths;
-  recordsRow.style.removeProperty('--record-font');
-  const style = getComputedStyle(recordsRow);
-  const available = recordsRow.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
-  const gap = parseFloat(style.columnGap)*(entries.length-1);
-  const labelsWidth = entries.reduce((sum,entry) => sum+entry.getBoundingClientRect().width,0);
-  if (labelsWidth+gap > available) {
-    const base = parseFloat(style.fontSize);
-    recordsRow.style.setProperty('--record-font', (base*(available-gap-1)/labelsWidth)+'px');
-  }
-}
-if (recordsRow && typeof ResizeObserver === 'function') {
-  new ResizeObserver(() => fitRecordRow(true)).observe(recordsRow);
-}
-
 function update() {
   const score = get('score');
   get('clock').textContent = formatTime(state.runTime);
   get('wins').textContent = record.wins+'회';
   get('best-score').textContent = record.score.toLocaleString('ko-KR');
   get('best-time').textContent = record.bestTime === null ? '—' : formatTime(record.bestTime);
-  fitRecordRow(true);
   get('reset-wins').hidden = state.mode !== 'paused';
   get('open-test').hidden = testMode || state.mode !== 'paused';
   get('reset-wins').disabled = record.wins === 0;
@@ -259,9 +237,9 @@ function update() {
     const left = Math.min(...cells.map(([x]) => x));
     const top = Math.min(...cells.map(([,y]) => y));
     for (const [x,y] of cells) {
-      const block = document.createElement('i');
+      const block = tileArt[type].cloneNode();
+      block.alt = '';
       block.style.gridArea = (y-top+1) + '/' + (x-left+1);
-      block.style.background = colors[type];
       grid.append(block);
     }
     return grid;
@@ -326,6 +304,7 @@ function start(lesson = !record.learned, level = 1) {
   starSlots.forEach(slot => slot.classList.remove('sb-spark'));
   document.getElementById('home').hidden = true;
   shell.hidden = false;
+  layoutPending = true;
   shell.classList.toggle('sb-ended',false);
   get('intro').hidden = get('panel').hidden = get('notice').hidden = true;
   get('lesson').hidden = !lesson;
@@ -912,8 +891,53 @@ function drawFallingPiece(flight, now) {
   ctx.restore();
 }
 
-function draw(now) {
+function drawRotateTrail(piece, name, t) {
+  const direction = name === 'reverse' ? -1 : 1;
+  const pivot = piece.type === 'I' ? 2 : 1.5;
+  const x = (piece.x+pivot)*unit, y = (piece.y+pivot)*unit;
+  const radius = piece.type === 'I' ? 63 : 51;
+  const centerAngle = y+radius > boardHeight ? -Math.PI/2 : Math.PI/2;
+  const start = centerAngle-direction*Math.PI/4;
+  const travel = Math.min(1,t/.83);
+  const angle = start+direction*travel*Math.PI/2;
+  const tail = Math.max(0,travel-.55);
+  const fade = 1-Math.max(0,(t-.83)/.17);
+
+  ctx.save();
+  if (travel > 0) {
+    ctx.globalAlpha = .3*fade;
+    ctx.strokeStyle = '#ffd477';
+    ctx.lineWidth = 1.5;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.arc(x,y,radius,start+direction*tail*Math.PI/2,angle,direction < 0);
+    ctx.stroke();
+  }
+  for (let i=3;i>=0;i--) {
+    const behind = i*.16;
+    const progress = travel-behind;
+    if (progress < 0) continue;
+    const position = start+direction*progress*Math.PI/2;
+    const visibility = Math.min(1,progress/.12);
+    const twinkle = i === 0 ? Math.sin(Math.PI*(1-fade)) : 0;
+    ctx.globalAlpha = visibility*fade*(1-i*.17);
+    ctx.fillStyle = i%2 ? '#ffd477' : '#fff7dc';
+    starBurst(x+Math.cos(position)*radius,y+Math.sin(position)*radius,5-i*.7+twinkle*4,0);
+  }
+  ctx.restore();
+}
+
+let layoutPending = true, gestureStep = 11;
+function updateLayout() {
+  layoutPending = false;
+  const viewport = window.visualViewport;
+  shell.style.setProperty('--sb-viewport-width', (viewport?.width ?? window.innerWidth)+'px');
+  shell.style.setProperty('--sb-viewport-height', (viewport?.height ?? window.innerHeight)+'px');
+  const {width:stageWidth,height:stageHeight} = stage.getBoundingClientRect();
+  scene.style.setProperty('--sb-scene-width', Math.min(stageWidth,stageHeight*320/568)+'px');
   const cssWidth = canvas.getBoundingClientRect().width;
+  gestureStep = Math.max(11,cssWidth/width*.72);
+  if (pointer && !pointer.aiming) pointer.step = gestureStep;
   if (cssWidth > 0) {
     const cellPixels = Math.max(1, Math.round(cssWidth * (window.devicePixelRatio || 1) / width));
     const pixelWidth = cellPixels * width, pixelHeight = cellPixels * height;
@@ -924,10 +948,19 @@ function draw(now) {
     const scale = cellPixels / unit;
     ctx.setTransform(scale, 0, 0, scale, 0, 0);
   }
+}
+
+// The game frame consumes all viewport events together before updating or drawing.
+const queueLayout = () => { layoutPending = true; };
+window.addEventListener('resize',queueLayout);
+window.visualViewport?.addEventListener('resize',queueLayout);
+window.addEventListener('orientationchange',queueLayout);
+
+function draw(now) {
   particlesLeft = maxParticles;
-  ctx.fillStyle = '#15102c';
+  ctx.fillStyle = '#160d27';
   ctx.fillRect(0,0,boardWidth,boardHeight);
-  ctx.fillStyle = '#302645';
+  ctx.fillStyle = '#4b2a69';
   for (let x=1;x<width;x++) ctx.fillRect(x*unit,0,1,boardHeight);
   for (let y=1;y<height;y++) ctx.fillRect(0,y*unit,boardWidth,1);
   const flash = state.flash;
@@ -999,35 +1032,26 @@ function draw(now) {
     if (!state.power) while (valid({...state.active,y:landing+1})) landing++;
     if (landing !== y) cells.forEach(([cx,cy]) => drawBlock(x+cx,landing+cy,type,true));
     const motion = state.motion;
-    if (motion && !reducedMotion.matches) {
-      const t = (now-motion.start)/125;
-      if (t >= 1) state.motion = null;
-      else {
-        const from = motion.piece;
-        const fade = Math.max(0,1-t);
-        ctx.save();
-        ctx.globalAlpha = .53*fade;
-        ctx.shadowColor = colors[type];
-        ctx.shadowBlur = 9;
-        from.cells.forEach(([cx,cy]) => drawBlock(from.x+cx,from.y+cy,type));
-        if (motion.name === 'rotate' || motion.name === 'reverse') {
-          const centerX = (x+1.5)*unit, centerY = (y+1.5)*unit;
-          const angle = (motion.name === 'reverse' ? -1 : 1)*t*2.1;
-          ctx.fillStyle = '#fff2ff';
-          ctx.globalAlpha = fade;
-          for (let i=0;i<3;i++) {
-            const arc = angle+i*Math.PI*2/3;
-            starBurst(centerX+Math.cos(arc)*42,centerY+Math.sin(arc)*42,7-i,arc);
-          }
-        }
-        ctx.restore();
-      }
+    const rotating = motion?.name === 'rotate' || motion?.name === 'reverse';
+    const t = motion ? Math.max(0,now-motion.start)/(rotating ? 180 : 125) : 1;
+    if (motion && t >= 1) state.motion = null;
+    if (motion && !rotating && t < 1 && !reducedMotion.matches) {
+      const from = motion.piece;
+      ctx.save();
+      ctx.globalAlpha = .53*(1-t);
+      ctx.shadowColor = colors[type];
+      ctx.shadowBlur = 9;
+      from.cells.forEach(([cx,cy]) => drawBlock(from.x+cx,from.y+cy,type));
+      ctx.restore();
     }
     ctx.save();
     ctx.shadowColor = colors[type];
     ctx.shadowBlur = 9;
     cells.forEach(([cx,cy]) => drawBlock(x+cx,y+cy,type));
     ctx.restore();
+    if (rotating && t < 1 && !reducedMotion.matches) {
+      drawRotateTrail(state.active,motion.name,t);
+    }
   }
   if (state.impact) {
     const {cells,start,distance,type} = state.impact;
@@ -1102,7 +1126,10 @@ function draw(now) {
 }
 
 function tick(now) {
+  const resized = layoutPending;
+  if (resized) updateLayout();
   if (state.mode === 'paused' && state.power) {
+    if (resized) draw(state.power.pausedAt);
     frameId = requestAnimationFrame(tick);
     return;
   }
@@ -1120,7 +1147,6 @@ function tick(now) {
     if (tenth !== state.clockTenth) {
       state.clockTenth = tenth;
       get('clock').textContent = formatTime(state.runTime);
-      fitRecordRow();
     }
     musicPressure();
     if (!flying && !state.active) {
@@ -1310,7 +1336,6 @@ get('audio-enable').onclick = () => {
 canvas.onpointerdown = event => {
   if (event.button !== 0 || !event.isPrimary) return;
   if (audio?.state !== 'running') sound([]);
-  const rect = canvas.getBoundingClientRect();
   if (state.mode === 'aim') {
     canvas.setPointerCapture?.(event.pointerId);
     pointer = {id:event.pointerId,x:event.clientX,y:event.clientY,aiming:true};
@@ -1319,7 +1344,7 @@ canvas.onpointerdown = event => {
   if (!activeModes.includes(state.mode) || !state.active || state.dropFlight) return;
   canvas.setPointerCapture?.(event.pointerId);
   pointer = {id:event.pointerId,piece:state.active,x:event.clientX,y:event.clientY,axis:null,
-    step:Math.max(11,rect.width/width*.72)};
+    step:gestureStep};
 };
 function moveGesture(event) {
   if (!pointer || event.pointerId !== pointer.id || pointer.piece !== state.active) return;
