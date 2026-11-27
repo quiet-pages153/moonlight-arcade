@@ -204,11 +204,12 @@ function fitRecordRow(force = false) {
   if (!force && fittedRecordLengths === lengths) return;
   fittedRecordLengths = lengths;
   recordsRow.style.removeProperty('--record-font');
-  const available = recordsRow.clientWidth;
-  const gap = 3*(entries.length-1);
+  const style = getComputedStyle(recordsRow);
+  const available = recordsRow.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+  const gap = parseFloat(style.columnGap)*(entries.length-1);
   const labelsWidth = entries.reduce((sum,entry) => sum+entry.getBoundingClientRect().width,0);
   if (labelsWidth+gap > available) {
-    const base = parseFloat(getComputedStyle(recordsRow).fontSize);
+    const base = parseFloat(style.fontSize);
     recordsRow.style.setProperty('--record-font', (base*(available-gap-1)/labelsWidth)+'px');
   }
 }
@@ -649,7 +650,7 @@ function advanceCharge(now) {
     }
     if (flight.slot !== slot) {
       const scene = flight.star.parentElement.getBoundingClientRect();
-      const board = field.getBoundingClientRect();
+      const board = canvas.getBoundingClientRect();
       const target = slot.getBoundingClientRect();
       flight.fromX = board.left-scene.left+flight.center/width*board.width-10;
       flight.fromY = board.top-scene.top+(flight.row+.5)/height*board.height-10;
@@ -891,9 +892,10 @@ function draw(now) {
   particlesLeft = maxParticles;
   ctx.fillStyle = '#15102c';
   ctx.fillRect(0,0,canvas.width,canvas.height);
-  ctx.fillStyle = '#34274e';
-  for (let x=1;x<width;x++) ctx.fillRect(x*unit,0,1,canvas.height);
-  for (let y=1;y<height;y++) ctx.fillRect(0,y*unit,canvas.width,1);
+  ctx.fillStyle = '#1d1538';
+  for (let y=0;y<height;y++) {
+    for (let x=y%2;x<width;x+=2) ctx.fillRect(x*unit,y*unit,unit,unit);
+  }
   const flash = state.flash;
   const age = flash ? now-flash.start : Infinity;
   const settling = flash?.rows && age < flash.lastHit+clearSettle;

@@ -113,6 +113,37 @@ function loadSprite(url){
   image.src=url;
   return image;
 }
+function loadBackgroundCutout(url,tolerance,brightness){
+  const image=loadSprite(url);
+  const layer=document.createElement('canvas');
+  layer.width=layer.height=0;
+  image.addEventListener('load',()=>{
+    layer.width=image.naturalWidth;
+    layer.height=image.naturalHeight;
+    const g=layer.getContext('2d');
+    g.drawImage(image,0,0);
+    const pixels=g.getImageData(0,0,layer.width,layer.height);
+    const {data}=pixels;
+    const red=data[0],green=data[1],blue=data[2];
+    for(let i=0;i<data.length;i+=4){
+      const distance=Math.max(Math.abs(data[i]-red),Math.abs(data[i+1]-green),Math.abs(data[i+2]-blue));
+      if(distance<=tolerance){
+        data[i+3]=0;
+      }else if(brightness!==1){
+        data[i]*=brightness;
+        data[i+1]*=brightness;
+        data[i+2]*=brightness;
+      }
+    }
+    g.putImageData(pixels,0,0);
+  },{once:true});
+  return layer;
+}
+const skyArt=loadSprite("assets/sprites/bg-sky.png");
+const bigMoonArt=loadBackgroundCutout("assets/sprites/bg-bigmoon.png",8,1);
+const terrainArt=loadBackgroundCutout("assets/sprites/bg-moon.png",13,.85);
+const skyTrim=24;
+let backgroundTime=0;
 const playerArt=[
   loadSprite("assets/sprites/player-base.png"), loadSprite("assets/sprites/player-cannon.png"),
   loadSprite("assets/sprites/player-pods.png"), loadSprite("assets/sprites/player-gold.png")
@@ -1500,20 +1531,13 @@ function weaponBeam(s,level){
       ctx.fillRect(x-4,y-6,8,20);
       ctx.fillRect(x-2,y+14,4,length*.55);
       break;
-    case 10:
-      ctx.fillRect(x-1,y-6,3,13);
-      ctx.fillRect(x-6,y-1,2,9);
-      ctx.fillRect(x+5,y-1,2,9);
-      ctx.fillRect(x-6,y+6,13,3);
-      ctx.fillRect(tail(.45)-1,y+8,3,length*.65);
-      break;
   }
   ctx.fillStyle='#fff9eb';
   ctx.fillRect(x-1,y-2,level===9?4:2,level===9?7:3);
 }
 function beam(s){
   const level=weaponLevels.get(s.style);
-  if(level){weaponBeam(s,level);return;}
+  if(level&&level<=maxPower){weaponBeam(s,level);return;}
   const style=s.style||weapons[0];
   const length=Math.min(style.length,5+s.age*565);
   const lean=s.vx*length/565;
@@ -1658,12 +1682,24 @@ function paintCombatNotices(){
     ctx.strokeText(notice,W/2,294);
     ctx.fillText(notice,W/2,294);
   }
-  if(run.bossBanner>0||(run.breakthrough&&run.clock<1)){
+  if(run.bossBanner>0){
+    ctx.beginPath();ctx.roundRect(8,23,W-16,47,12);
+    ctx.fillStyle='#4e2476';ctx.fill();
+    ctx.strokeStyle='#ffd67d';ctx.lineWidth=2;ctx.stroke();
+    ctx.fillStyle='#ffe6a6';
+    ctx.beginPath();
+    ctx.arc(42,46,8,-Math.PI/3,Math.PI/3,true);
+    ctx.quadraticCurveTo(38,46,46,39);
+    ctx.fill();
+    pixelStar(55,41,2);pixelStar(W-44,46,4);pixelStar(W-32,40,2);
+    ctx.font='bold 23px system-ui';
+    ctx.fillText('달그림자 출현!',W/2,55);
+  }else if(run.breakthrough&&run.clock<1){
     ctx.fillStyle='#402752';ctx.fillRect(8,23,W-16,47);
     ctx.strokeStyle='#e9b5f4';ctx.lineWidth=2;ctx.strokeRect(9,24,W-18,45);
     ctx.fillStyle='#ffe6a6';pixelStar(41,46,6);pixelStar(W-41,46,6);
     ctx.font='bold 23px system-ui';
-    ctx.fillText(run.breakthrough?breakthroughLabel():'달그림자 출현!',W/2,55);
+    ctx.fillText(breakthroughLabel(),W/2,55);
   }
   if(run.specialNotice>0){
     const id=run.lastSpecial;
@@ -1673,9 +1709,28 @@ function paintCombatNotices(){
     ctx.fillText(companions[id].name+'의 '+specialNames[id]+'!',W/2,110);
   }
 }
+function paintBackground(){
+  ctx.fillStyle='#1a1035';ctx.fillRect(0,0,W,H);
+  const time=backgroundTime;
+  const hasSky=skyArt.complete&&skyArt.naturalWidth>0;
+  if(hasSky){
+    const sourceHeight=skyArt.naturalHeight-2*skyTrim;
+    const tileHeight=sourceHeight*W/skyArt.naturalWidth;
+    const offset=Math.floor((time*12)%tileHeight);
+    for(let y=offset-tileHeight;y<H;y+=tileHeight){
+      ctx.drawImage(skyArt,0,skyTrim,skyArt.naturalWidth,sourceHeight,0,y,W,tileHeight);
+    }
+  }
+  ctx.fillStyle='#5a487a';
+  for(let i=0;i<stars.length;i+=hasSky?2:1){
+    const [x,y,size]=stars[i];
+    ctx.fillRect(x,y,size,size);
+  }
+  if(bigMoonArt.width)ctx.drawImage(bigMoonArt,279+Math.sin(time*.14)*6,-30+Math.sin(time*.11)*5,120,120);
+  if(terrainArt.width)ctx.drawImage(terrainArt,0,H-110,W,110);
+}
 function paint(){
-  ctx.fillStyle='#14122d';ctx.fillRect(0,0,W,H);
-  ctx.fillStyle='#1b1737';ctx.fillRect(3,3,W-6,H-6);
+  paintBackground();
   ctx.strokeStyle='#665087';ctx.strokeRect(4,4,W-8,H-8);
   ctx.fillStyle='#c9a2e5';
   for(const [x,y] of boardCorners)ctx.fillRect(x,y,4,4);
@@ -1686,8 +1741,6 @@ function paint(){
       ctx.translate(Math.sin(t*155)*kick,Math.cos(t*115)*kick*.42);
     }else if(run.flash)ctx.translate(Math.sin(run.flash*140)*run.flash*18,0);
   }
-  ctx.fillStyle='#5a487a';
-  for(const [x,y,size] of stars)ctx.fillRect(x,y,size,size);
   if(run.escort)paintEscort(run.escort);
   if(run.extra&&run.clock<1.25){
     ctx.fillStyle='#ffe9ab';ctx.font='bold 22px system-ui';ctx.textAlign='center';
@@ -1995,6 +2048,7 @@ function frame(now){
     musicSilenceUntil=0;syncBattleTone();
   }
   if(state==='playing'){
+    if(!reducedMotion.matches)backgroundTime+=dt;
     for(const key of combatTimers){
       if(run[key]>0)run[key]=Math.max(0,run[key]-dt);
     }

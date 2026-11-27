@@ -12,9 +12,9 @@ source = source.replace(/<script src="(js\/[^"?]+\.js)(?:\?[^"]*)?"><\/script>/g
   scripts++;
   return '<script>\n' + fs.readFileSync(path.join(root, file), 'utf8') + '</script>';
 });
-const mime = { '.mp3': 'audio/mpeg', '.wav': 'audio/wav' };
+const mime = { '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.jpg': 'image/jpeg' };
 let count = 0;
-const result = source.replace(/"(assets\/(?:home|sprites|audio|blocks)\/[^"]+\.(?:png|mp3|wav))"/g, (_, file) => {
+const result = source.replace(/"(assets\/(?:home|sprites|audio|blocks)\/[^"]+\.(?:png|jpg|mp3|wav))"/g, (_, file) => {
   count++;
   const data = fs.readFileSync(path.join(root, file)).toString('base64');
   return `"data:${mime[path.extname(file)] || 'image/png'};base64,${data}"`;
