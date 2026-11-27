@@ -31,8 +31,19 @@ const storageKey = testMode ? 'moonlight-starlight-blocks-test-v1' : 'moonlight-
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 const empty = () => Array(width).fill(null);
 let record = {score:0, combo:0, learned:false, muted:false, musicMuted:false, wins:0, bestTime:null};
-try { Object.assign(record, JSON.parse(localStorage.getItem(storageKey) || '{}')); } catch {}
-const save = () => { try { localStorage.setItem(storageKey, JSON.stringify(record)); } catch {} };
+function readRecord() {
+  try {
+    const {homeCard, ...savedRecord} = JSON.parse(localStorage.getItem(storageKey) || '{}') || {};
+    return savedRecord;
+  }
+  catch { return {}; }
+}
+Object.assign(record, readRecord());
+const save = () => {
+  try {
+    localStorage.setItem(storageKey, JSON.stringify(record));
+  } catch {}
+};
 let state, frameId, lastTime, pointer, audio, toastTimer;
 const fallTimes = [910,660,500,400,340,290,255,225,200,180];
 const finishLines = 60;
@@ -240,7 +251,6 @@ function update() {
   get('music').setAttribute('aria-pressed',String(!record.musicMuted));
   syncMusic();
   showAudioPrompt();
-  get('confirm').disabled = !state.target;
   const preview = get('next');
   preview.replaceChildren(...state.queue.slice(0,2).map(type => {
     const grid = document.createElement('span');
@@ -263,8 +273,13 @@ function canAim() {
 function updatePowers() {
   gauge.setAttribute('aria-label','별빛 '+state.charge+'/5');
   starSlots.forEach((slot,i) => slot.classList.toggle('ready',i < state.charge));
-  get('meteor').disabled = !canAim() || state.charge < 3;
-  get('cross').disabled = !canAim() || state.charge < 5;
+  const aiming = state.mode === 'aim';
+  for (const [id,cost] of [['meteor',3],['cross',5]]) {
+    const button = get(id);
+    button.disabled = !(aiming || canAim()) || state.charge < cost;
+    button.setAttribute('aria-pressed',String(aiming && state.cost === cost));
+  }
+  get('pause').disabled = state.mode === 'lesson';
   canvas.classList.toggle('sb-full',state.charge === 5);
 }
 function remember() {
@@ -278,7 +293,7 @@ function panel(title, message, primary, secondary = '오락실') {
   get('primary').textContent = primary;
   get('secondary').textContent = secondary;
   const dialog = get('panel');
-  const panelHost = (state.mode === 'ended' && get('playframe')) || shell;
+  const panelHost = state.mode === 'ended' ? field : shell;
   if (dialog.parentElement !== panelHost) panelHost.append(dialog);
   get('panel').hidden = false;
   get('primary').focus();
@@ -312,7 +327,7 @@ function start(lesson = !record.learned, level = 1) {
   document.getElementById('home').hidden = true;
   shell.hidden = false;
   shell.classList.toggle('sb-ended',false);
-  get('intro').hidden = get('panel').hidden = get('aim').hidden = get('notice').hidden = true;
+  get('intro').hidden = get('panel').hidden = get('notice').hidden = true;
   get('lesson').hidden = !lesson;
   state = {board:Array.from({length:height},empty), queue:[], active:null, mode:lesson?'lesson':'play',
     score:0, lines:(level-1)*6, combo:0, bestCombo:0, level, charge:0, target:null, flash:null, lessonPlaced:false,
@@ -322,9 +337,6 @@ function start(lesson = !record.learned, level = 1) {
     for (const x of [0,1,2,3,4,7,8,9]) state.board[height-1][x] = x < 4 ? 'T':'S';
     get('lesson-text').textContent = '판을 옆으로 밀어 점선을 빈틈에 맞춘 뒤 떨어뜨려 보세요.';
     get('skip').textContent = '건너뛰기';
-    get('pause').disabled = true;
-  } else {
-    get('pause').disabled = false;
   }
   if (level > 1) planAttacks(level);
   spawn();
@@ -342,6 +354,7 @@ function leave() {
   shell.hidden = true;
   syncMusic();
   document.getElementById('home').hidden = false;
+  window.moonlightArcade.refreshHomeRecords?.();
   document.querySelector('[data-game="blocks"]').focus({preventScroll:true});
 }
 function completeLesson() {
@@ -580,7 +593,7 @@ function drawBlock(x,y,type,ghost = false) {
   }
   const tile = tileArt[type];
   if (tile?.complete && tile.naturalWidth) {
-    ctx.drawImage(tile,px+1,py+1,unit-2,unit-2);
+    ctx.drawImage(tile,px,py,unit,unit);
     return;
   }
   ctx.fillStyle = '#231637'; ctx.fillRect(px+1,py+1,unit-2,unit-2);
@@ -732,6 +745,13 @@ function drawMeteorTarget({x,y},cross) {
   ctx.fillStyle = '#fff1b8';
   ctx.fillRect(x*unit+3,0,5,boardHeight);
   if (cross) ctx.fillRect(0,y*unit+3,boardWidth,5);
+  if (state.mode === 'aim') {
+    ctx.save();
+    ctx.strokeStyle = '#fff1b8';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x*unit+1,y*unit+1,unit-2,unit-2);
+    ctx.restore();
+  }
 }
 
 const quadTail = 610;
@@ -907,10 +927,9 @@ function draw(now) {
   particlesLeft = maxParticles;
   ctx.fillStyle = '#15102c';
   ctx.fillRect(0,0,boardWidth,boardHeight);
-  ctx.fillStyle = '#1d1538';
-  for (let y=0;y<height;y++) {
-    for (let x=y%2;x<width;x+=2) ctx.fillRect(x*unit,y*unit,unit,unit);
-  }
+  ctx.fillStyle = '#302645';
+  for (let x=1;x<width;x++) ctx.fillRect(x*unit,0,1,boardHeight);
+  for (let y=1;y<height;y++) ctx.fillRect(0,y*unit,boardWidth,1);
   const flash = state.flash;
   const age = flash ? now-flash.start : Infinity;
   const settling = flash?.rows && age < flash.lastHit+clearSettle;
@@ -1129,22 +1148,23 @@ function tick(now) {
   frameId = requestAnimationFrame(tick);
 }
 function aim(cost = 3) {
-  if (!canAim() || state.charge < cost) return;
+  const aiming = state.mode === 'aim';
+  if (aiming && state.cost === cost) { closeAim(); return; }
+  if ((!aiming && !canAim()) || state.charge < cost) return;
   state.cost = cost;
   pointer = null;
-  state.beforeAim = state.mode;
-  state.mode = 'aim';
+  if (!aiming) state.beforeAim = state.mode;
   state.target = null;
-  get('aim').hidden = false;
-  get('aim-text').textContent = cost === 5 ? '십자의 교차점을 고르세요.' : '지울 세로줄을 고르세요.';
+  state.mode = 'aim';
   canvas.focus({preventScroll:true});
   update();
 }
 function closeAim() {
   if (state.mode !== 'aim') return;
-  state.mode = state.beforeAim; state.target = null;
+  state.mode = state.beforeAim;
+  state.target = null;
+  pointer = null;
   lastTime = performance.now();
-  get('aim').hidden = true;
   update();
   canvas.focus({preventScroll:true});
 }
@@ -1184,18 +1204,16 @@ get('practice').onclick = () => start(true);
 get('intro-skip').onclick = completeLesson;
 get('meteor').onclick = () => aim(3);
 get('cross').onclick = () => aim(5);
-get('cancel').onclick = closeAim;
-get('confirm').onclick = () => {
-  if (state.mode !== 'aim' || !state.target) return;
+function activatePower() {
+  if (!state.target) return;
   state.power = {target:state.target,cross:state.cost === 5,phase:'hit',chain:0,rounds:0,until:performance.now()+powerHitStop,
     keepLock:state.resets >= 8 && !!state.active && grounded()};
   state.mode = 'power';
   state.charge -= state.cost;
   state.motion = state.impact = null;
-  get('aim').hidden = true;
   canvas.focus({preventScroll:true});
   update();
-};
+}
 function advancePower(now) {
   const power = state.power;
   if (power.phase === 'hit') {
@@ -1281,13 +1299,6 @@ get('primary').onclick = () => {
   }
 };
 get('secondary').onclick = leave;
-function selectTarget(x,y) {
-  if (x<0 || x>=width || y<0 || y>=height) return;
-  if (!state.board.some(row => row[x]) && !(state.cost === 5 && state.board[y].some(Boolean))) return;
-  state.target = {x,y};
-  get('aim-text').textContent = state.cost === 5 ? '이 십자를 지울까요?' : (x+1)+'번째 세로줄을 지울까요?';
-  get('confirm').disabled = false;
-}
 // A touch activates playback when the finger lifts, before the gesture handler runs.
 for (const eventName of ['pointerup','touchend','click']) {
   shell.addEventListener?.(eventName, unlockGameAudio, {capture:true, passive:true});
@@ -1301,9 +1312,8 @@ canvas.onpointerdown = event => {
   if (audio?.state !== 'running') sound([]);
   const rect = canvas.getBoundingClientRect();
   if (state.mode === 'aim') {
-    const x = Math.floor((event.clientX-rect.left)*width/rect.width);
-    const y = Math.floor((event.clientY-rect.top)*height/rect.height);
-    selectTarget(x,y);
+    canvas.setPointerCapture?.(event.pointerId);
+    pointer = {id:event.pointerId,x:event.clientX,y:event.clientY,aiming:true};
     return;
   }
   if (!activeModes.includes(state.mode) || !state.active || state.dropFlight) return;
@@ -1327,7 +1337,20 @@ function moveGesture(event) {
 }
 canvas.onpointermove = moveGesture;
 canvas.onpointerup = event => {
-  if (!pointer || event.pointerId !== pointer.id || pointer.piece !== state.active) return;
+  if (!pointer || event.pointerId !== pointer.id) return;
+  if (pointer.aiming) {
+    const tap = Math.hypot(event.clientX-pointer.x,event.clientY-pointer.y) < 12;
+    pointer = null;
+    if (!tap || state.mode !== 'aim') return;
+    const rect = canvas.getBoundingClientRect();
+    const x = Math.floor((event.clientX-rect.left)*width/rect.width);
+    const y = Math.floor((event.clientY-rect.top)*height/rect.height);
+    if (x<0 || x>=width || y<0 || y>=height) return;
+    if (state.target?.tapped && state.target.x === x && state.target.y === y) activatePower();
+    else state.target = {x,y,tapped:true};
+    return;
+  }
+  if (pointer.piece !== state.active) return;
   moveGesture(event);
   const {axis,downDistance,step} = pointer;
   pointer = null;
@@ -1345,28 +1368,37 @@ document.addEventListener('keydown', event => {
     else pause();
     return;
   }
+  const key = event.key.toLowerCase();
+  if (['m','n'].includes(key)) {
+    if (!event.repeat) aim(key === 'n' ? 5 : 3);
+    return;
+  }
   if (state.mode === 'aim' && event.target === canvas) {
-    const direction = {ArrowLeft:-1,ArrowUp:-1,ArrowRight:1,ArrowDown:1}[event.key];
+    const direction = {ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]}[event.key];
     if (direction) {
       event.preventDefault();
-      const targets = state.board.flatMap((row,y) => row.flatMap((type,x) => type ? [{x,y}] : []));
-      if (!targets.length) return;
-      const i = targets.findIndex(cell => cell.x === state.target?.x && cell.y === state.target?.y);
-      const target = targets[i < 0 ? (direction > 0 ? 0 : targets.length-1) : (i+direction+targets.length)%targets.length];
-      selectTarget(target.x,target.y);
-    } else if (event.key === 'Enter') get('confirm').click();
+      const row = state.target ? -1 : state.board.findLastIndex(cells => cells.some(Boolean));
+      const {x,y} = state.target ?? {
+        x:row < 0 ? Math.floor(width/2) : state.board[row].findIndex(Boolean),
+        y:row < 0 ? height-1 : row
+      };
+      const [dx,dy] = direction;
+      state.target = {x:Math.max(0,Math.min(width-1,x+dx)),y:Math.max(0,Math.min(height-1,y+dy))};
+    } else if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      if (!event.repeat) activatePower();
+    }
     return;
   }
   if (event.target.closest?.('button') && [' ','Enter'].includes(event.key)) return;
   if (!activeModes.includes(state.mode)) return;
-  const key = event.key.toLowerCase();
   const name = {arrowleft:'left',a:'left',arrowright:'right',d:'right',arrowdown:'down',s:'down',
     arrowup:'rotate',x:'rotate',z:'reverse',w:'rotate',' ':'drop'}[key];
   if (name) {
     if (audio?.state !== 'running') sound([]);
     event.preventDefault();
     if (!event.repeat || !['drop','rotate','reverse'].includes(name)) action(name);
-  } else if (['m','n'].includes(key) && !event.repeat) aim(key === 'n' ? 5 : 3);
+  }
 });
 document.addEventListener('visibilitychange', () => { if (document.hidden && !shell.hidden) pause(); });
 window.moonlightArcade.register('blocks',{start:() => {
