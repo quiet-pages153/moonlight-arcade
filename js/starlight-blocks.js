@@ -4,6 +4,7 @@ const get = id => document.getElementById('sb-' + id);
 const shell = get('game'), canvas = get('board'), ctx = canvas.getContext('2d');
 const field = get('field'), gauge = get('stars'), starSlots = [...gauge.children];
 const width = 10, height = 18, unit = 32;
+const boardWidth = width * unit, boardHeight = height * unit;
 const activeModes = ['play','lesson'];
 const rowScores = [0,100,260,460,740];
 const ghostDash = [4,4], solidLine = [];
@@ -276,6 +277,9 @@ function panel(title, message, primary, secondary = '오락실') {
   get('panel-message').textContent = message;
   get('primary').textContent = primary;
   get('secondary').textContent = secondary;
+  const dialog = get('panel');
+  const panelHost = (state.mode === 'ended' && get('playframe')) || shell;
+  if (dialog.parentElement !== panelHost) panelHost.append(dialog);
   get('panel').hidden = false;
   get('primary').focus();
 }
@@ -723,11 +727,11 @@ function beginClear(board, rows, active, combo, charge = 0) {
 
 function drawMeteorTarget({x,y},cross) {
   ctx.fillStyle = '#e7aaff60';
-  ctx.fillRect(x*unit,0,unit,canvas.height);
-  if (cross) ctx.fillRect(0,y*unit,canvas.width,unit);
+  ctx.fillRect(x*unit,0,unit,boardHeight);
+  if (cross) ctx.fillRect(0,y*unit,boardWidth,unit);
   ctx.fillStyle = '#fff1b8';
-  ctx.fillRect(x*unit+3,0,5,canvas.height);
-  if (cross) ctx.fillRect(0,y*unit+3,canvas.width,5);
+  ctx.fillRect(x*unit+3,0,5,boardHeight);
+  if (cross) ctx.fillRect(0,y*unit+3,boardWidth,5);
 }
 
 const quadTail = 610;
@@ -737,9 +741,9 @@ function drawQuadFinale(flash, age) {
   if (elapsed < 0 || elapsed >= quadTail) return;
   const t = elapsed/quadTail;
   const still = reducedMotion.matches;
-  const x = canvas.width / 2;
-  const y = Math.min(canvas.height-90,Math.max(100,(flash.rows[0]+.5)*unit-42));
-  const titleY = Math.max(48,Math.min(canvas.height-130,y-56));
+  const x = boardWidth / 2;
+  const y = Math.min(boardHeight-90,Math.max(100,(flash.rows[0]+.5)*unit-42));
+  const titleY = Math.max(48,Math.min(boardHeight-130,y-56));
   ctx.save();
   if (!still) {
     const travel = 1-(1-t)**3;
@@ -748,7 +752,7 @@ function drawQuadFinale(flash, age) {
     ctx.shadowColor = '#ec8dff';
     ctx.shadowBlur = 17;
     ctx.lineWidth = 7*(1-t)+1;
-    ctx.strokeRect(5,5,canvas.width-10,canvas.height-10);
+    ctx.strokeRect(5,5,boardWidth-10,boardHeight-10);
     ctx.shadowBlur = 0;
     ctx.beginPath();
     ctx.ellipse(x,y,18+travel*173,9+travel*112,0,0,Math.PI*2);
@@ -822,7 +826,7 @@ function drawClearParticles(flash, age) {
       const strength = clearStrengths[Math.min(4,flash.rows.length)];
       ctx.globalAlpha = Math.max(0,1-t*4)*strength;
       ctx.fillStyle = flash.quad ? '#fff0ba' : '#fff2ff';
-      ctx.fillRect(0,row*unit,canvas.width,unit);
+      ctx.fillRect(0,row*unit,boardWidth,unit);
       if (still) return;
       const travel = 1-(1-t)**2;
       flash.board[row].forEach((type,x) => {
@@ -849,8 +853,8 @@ function drawClearParticles(flash, age) {
       ctx.fillStyle = '#f5dbff';
       const y = Math.max(35, Math.min(...flash.rows)*unit-10);
       const title = combo+' 콤보';
-      ctx.strokeText(title,canvas.width-9,y);
-      ctx.fillText(title,canvas.width-9,y);
+      ctx.strokeText(title,boardWidth-9,y);
+      ctx.fillText(title,boardWidth-9,y);
     }
   }
   ctx.globalAlpha = 1;
@@ -889,9 +893,20 @@ function drawFallingPiece(flight, now) {
 }
 
 function draw(now) {
+  const cssWidth = canvas.getBoundingClientRect().width;
+  if (cssWidth > 0) {
+    const cellPixels = Math.max(1, Math.round(cssWidth * (window.devicePixelRatio || 1) / width));
+    const pixelWidth = cellPixels * width, pixelHeight = cellPixels * height;
+    if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
+      canvas.width = pixelWidth;
+      canvas.height = pixelHeight;
+    }
+    const scale = cellPixels / unit;
+    ctx.setTransform(scale, 0, 0, scale, 0, 0);
+  }
   particlesLeft = maxParticles;
   ctx.fillStyle = '#15102c';
-  ctx.fillRect(0,0,canvas.width,canvas.height);
+  ctx.fillRect(0,0,boardWidth,boardHeight);
   ctx.fillStyle = '#1d1538';
   for (let y=0;y<height;y++) {
     for (let x=y%2;x<width;x+=2) ctx.fillRect(x*unit,y*unit,unit,unit);
@@ -932,7 +947,7 @@ function draw(now) {
   if (state.attacks[0]) {
     ctx.fillStyle = '#ffce87';
     state.attacks[0].rows[0].forEach((type,x) => {
-      if (!type) ctx.fillRect(x*unit+4,canvas.height-5,unit-8,3);
+      if (!type) ctx.fillRect(x*unit+4,boardHeight-5,unit-8,3);
     });
   }
   const riseStart = Math.max(state.riseAt ?? -Infinity,flash?.rows && state.riseAt >= flash.start ? flash.start+flash.lastHit+clearSettle : -Infinity);
@@ -946,14 +961,14 @@ function draw(now) {
     ctx.shadowBlur = 17;
     ctx.lineWidth = 3;
     for (let i=0;i<state.riseRows;i++) {
-      const y = canvas.height-(i+1)*unit;
-      ctx.strokeRect(3,y+2,canvas.width-6,unit-4);
+      const y = boardHeight-(i+1)*unit;
+      ctx.strokeRect(3,y+2,boardWidth-6,unit-4);
     }
     if (!reducedMotion.matches) {
       ctx.shadowBlur = 0;
       for (let i=0;i<16;i++) {
         ctx.fillStyle = i%3 ? '#d4a3ff' : '#fff1ce';
-        starBurst(10+i*20,canvas.height-(8+(i%4)*25)*t,7*(1-t*.7),i+t*3);
+        starBurst(10+i*20,boardHeight-(8+(i%4)*25)*t,7*(1-t*.7),i+t*3);
       }
     }
     ctx.restore();
@@ -1046,20 +1061,20 @@ function draw(now) {
       ctx.globalAlpha = (1-t)*.85;
       ctx.strokeStyle = cross ? '#d798ff' : '#ffe18b';
       ctx.lineWidth = 8;
-      ctx.strokeRect(4,4,canvas.width-8,canvas.height-8);
+      ctx.strokeRect(4,4,boardWidth-8,boardHeight-8);
       if (cross) {
         ctx.fillStyle = '#ba6cff';
         ctx.globalAlpha = (1-t)*.24;
-        ctx.fillRect(0,0,canvas.width,canvas.height);
+        ctx.fillRect(0,0,boardWidth,boardHeight);
         if (!reducedMotion.matches) {
-          const y = t*canvas.height;
+          const y = t*boardHeight;
           const wave = ctx.createLinearGradient(0,y-85,0,y+25);
           wave.addColorStop(0,'#ba6cff00');
           wave.addColorStop(.7,'#edd3ff');
           wave.addColorStop(1,'#ba6cff00');
           ctx.globalAlpha = .65*(1-t);
           ctx.fillStyle = wave;
-          ctx.fillRect(0,y-85,canvas.width,110);
+          ctx.fillRect(0,y-85,boardWidth,110);
         }
       }
       ctx.globalAlpha = 1;

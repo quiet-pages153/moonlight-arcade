@@ -555,7 +555,7 @@ function companionDropChance(){
   const other=(area>1?20:0)+(area===2?20:area===4?14:0);
   const previousFinalSize=area===5?30:0;
   const finalSize=area===5?breakthroughRoutes.reduce((total,_,i)=>total+breakthroughSize(i+1),0):0;
-  return .045*(baseFormationSize(area)*2+other+previousFinalSize)/(formationSize(area)*formationWaves+other+finalSize);
+  return .55*.045*(baseFormationSize(area)*2+other+previousFinalSize)/(formationSize(area)*formationWaves+other+finalSize);
 }
 const victoryBursts=[
   [.34,-32,5],[.72,29,-12],[1.08,-16,-19],

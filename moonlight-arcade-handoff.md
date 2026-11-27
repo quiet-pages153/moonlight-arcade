@@ -81,4 +81,4 @@ GitHub: https://github.com/quiet-pages153/moonlight-arcade · 주소: https://qu
 - 슈팅: 배경 bg-sky(위아래 24px 잘라 반복), bg-bigmoon(오른쪽 위), bg-moon(아래 달 표면), 단색 배경은 불러올 때 투명 처리. 10단계 탄은 예전 금빛 3방향 빛줄기로 복구(사용자 선호). '달그림자 출현!' 띠는 금빛 테두리·보라 면·달과 별로 귀엽게(사용자: B안 보스 화면은 과하고 무서움 → 보스 그림은 그대로).
 - 블록: 양옆 별 기둥, 보드 바로 아래 금빛 기록판, 격자는 가는 선 대신 칸 면.
 - 빌드: build_offline.py / .js 가 jpg도 포함하도록 수정. 원본 큰 그림은 assets/home2/(git 제외), 시안은 review/(git 제외).
-- 사용자가 고른 시안: review/home-mock-a.png, shooting-mock-a.png, blocks-mock-a.png.
+- 사용자가 고른 시안: review/home-mock-a.png, shooting-mock-a.png, blocks-mock-a.png.- (11-27 추가 수정) 홈: 간판·카드 밝기 .86~.88·채도 .82, 입구는 더 어둡게(문 빛·전구 깜빡임 제거), 배경 #11032a. 슈팅: 동료 아이템 드롭 확률을 이전의 55%로. 블록: 새 보석 블록 7종(보라 구름·하늘 반짝이·파랑 달·금 별·주황 달·민트 구름·분홍 별, 채도 낮춤, 시트 review/block-sheet2.png), 칸은 정사각형(보드 10:18, DPR 반영), 위 두 줄·간판 압축, 조준 안내는 보드 위 좁은 띠, 결산 팝업은 진보라·금빛 계단 테두리.
